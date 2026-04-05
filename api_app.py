@@ -5,13 +5,14 @@ FastAPI application for computing user recommendations
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
+from typing import List
 import json
 import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import networkx as nx
-from utils.suggestions import compute_user_suggestions
+from utils.suggestions import compute_user_suggestions, load_user_attributes_from_csv
 import psycopg2
 import uvicorn
 
@@ -20,6 +21,18 @@ app = FastAPI(
     description="Hybrid recommendation engine for user suggestions",
     version="1.0.0"
 )
+
+
+@app.get("/")
+def root():
+    """Root endpoint with API information"""
+    return {
+        "message": "Welcome to the User Suggestion API",
+        "version": "1.0.0",
+        "description": "Hybrid recommendation engine for user suggestions",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
 
 # Response models
@@ -48,6 +61,20 @@ class SuggestionsResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     message: str
+
+
+class UserAttributes(BaseModel):
+    user_id: str
+    username: str
+    full_name: str
+    hobbies: str | None = None
+    address: str | None = None
+    bio: str | None = None
+    education: str | None = None
+    occupation: str | None = None
+    followers: list[str] = []
+    following: list[str] = []
+    interests: list[str] = []
 
 
 class StatsResponse(BaseModel):
@@ -155,13 +182,32 @@ def get_suggestions_detailed(
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 
+@app.get("/api/users", response_model=list[UserAttributes])
+def get_users():
+    """Return all user attributes from the CSV data source."""
+    return load_user_attributes_from_csv()
+
+
+@app.get("/api/users/{user_id}", response_model=UserAttributes)
+def get_user(user_id: str):
+    """Return a specific user record from the CSV data source."""
+    users = load_user_attributes_from_csv()
+    for user in users:
+        if user['user_id'] == user_id:
+            return user
+    raise HTTPException(status_code=404, detail="User not found")
+
+
 @app.get("/api/stats", response_model=StatsResponse)
 def get_stats():
     """Get API statistics and available endpoints"""
     return StatsResponse(
         api_version="1.0.0",
         endpoints=[
+            "/",
             "/health",
+            "/api/users",
+            "/api/users/{user_id}",
             "/api/suggestions/{user_id}",
             "/api/suggestions/{user_id}/detailed",
             "/api/stats"

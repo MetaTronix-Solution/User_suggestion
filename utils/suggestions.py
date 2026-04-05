@@ -156,15 +156,37 @@ def get_all_user_attributes():
 
     return attributes
 
+
+def load_user_attributes_from_csv(csv_path='all_users_attributes_v3.csv'):
+    """Load user attributes from a CSV file and parse JSON/list columns."""
+    df = pd.read_csv(csv_path, dtype=str)
+
+    array_columns = ['followers', 'following', 'interests']
+    for col in array_columns:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda v: json.loads(v) if pd.notna(v) and isinstance(v, str) else [])
+
+    string_columns = ['user_id', 'username', 'full_name', 'hobbies', 'address', 'bio', 'education', 'occupation']
+    for col in string_columns:
+        if col in df.columns:
+            df[col] = df[col].where(df[col].notna(), None)
+
+    return df.to_dict(orient='records')
+
+
 # Load data and compute suggestions
 def compute_user_suggestions(target_user_id, top_n=5):
     # Load CSV
-    df = pd.read_csv('all_users_attributes_v3.csv')
+    df = pd.read_csv('all_users_attributes_v3.csv', dtype=str)
     
     # Parse JSON columns
-    df['followers'] = df['followers'].apply(json.loads)
-    df['following'] = df['following'].apply(json.loads)
-    df['interests'] = df['interests'].apply(json.loads)
+    for col in ['followers', 'following', 'interests']:
+        df[col] = df[col].apply(lambda v: json.loads(v) if pd.notna(v) and isinstance(v, str) else [])
+    
+    # Normalize text fields to avoid NaN values
+    for col in ['bio', 'education', 'occupation', 'hobbies', 'address']:
+        if col in df.columns:
+            df[col] = df[col].where(df[col].notna(), '')
     
     # Initialize model for embeddings
     model = SentenceTransformer('paraphrase-MiniLM-L3-v2')

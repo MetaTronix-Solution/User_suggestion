@@ -1,0 +1,307 @@
+{
+  "target_user_id": "bd4cade0-3abd-45e5-a1c0-30f8c64681cd",
+  "generated_at": "2026-04-13T05:11:21.569907",
+  "total": 10,
+  "suggestions": [
+    {
+      "user_id": "0ba82e2b-0cc2-400d-bfbc-a4a95c1cc995",
+      "username": "ronit123",
+      "full_name": "Ronit Shrivastav",
+      "affinity_score": 0.0333,
+      "mutual_count": 0,
+      "shared_tags": [],
+      "reason": "Suggested for you",
+      "interests": [],
+      "breakdown": {
+        "text_score": 0.0,
+        "graph_score": 0.0,
+        "adamic_adar": 0.0,
+        "second_degree": 0.0,
+        "interest_score": 0.0,
+        "location_score": 0.0,
+        "interaction_score": 0.0,
+        "collab_score": 0.0,
+        "activity_score": 0.665
+      },
+      "weights_used": {
+        "text": 0.45,
+        "graph": 0.0,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
+      }
+    },
+    {
+      "user_id": "3135383a-7163-42d1-806b-e87d20231d68",
+      "username": "Prasiddha7",
+      "full_name": "Prasiddha Subedi",
+      "affinity_score": 0.0196,
+      "mutual_count": 0,
+      "shared_tags": [],
+      "reason": "Suggested for you",
+      "interests": [],
+      "breakdown": {
+        "text_score": 0.0,
+        "graph_score": 0.0,
+        "adamic_adar": 0.0,
+        "second_degree": 0.0,
+        "interest_score": 0.0,
+        "location_score": 0.0,
+        "interaction_score": 0.0,
+        "collab_score": 0.0,
+        "activity_score": 0.392
+      },
+      "weights_used": {
+        "text": 0.45,
+        "graph": 0.0,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
+      }
+    },
+    {
+      "user_id": "0e83661b-955e-42aa-a9e9-5b4a7872e516",
+      "username": "Beckham7",
+      "full_name": "David Beckham",
+      "affinity_score": 0.0195,
+      "mutual_count": 0,
+      "shared_tags": [],
+      "reason": "Suggested for you",
+      "interests": [],
+      "breakdown": {
+        "text_score": 0.0,
+        "graph_score": 0.0,
+        "adamic_adar": 0.0,
+        "second_degree": 0.0,
+        "interest_score": 0.0,
+        "location_score": 0.0,
+        "interaction_score": 0.0,
+        "collab_score": 0.0,
+        "activity_score": 0.389
+      },
+      "weights_used": {
+        "text": 0.45,
+        "graph": 0.0,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
+      }
+    },
+    {
+      "user_id": "72f9a576-f5f1-4fd8-9801-0605a9b00483",
+      "username": "siddhartha",
+      "full_name": "Siddhartha Yadav",
+      "affinity_score": 0.0175,
+      "mutual_count": 0,
+      "shared_tags": [],
+      "reason": "Suggested for you",
+      "interests": [],
+      "breakdown": {
+        "text_score": 0.0,
+        "graph_score": 0.0,
+        "adamic_adar": 0.0,
+        "second_degree": 0.0,
+        "interest_score": 0.0,
+        "location_score": 0.0,
+        "interaction_score": 0.0,
+        "collab_score": 0.0,
+        "activity_score": 0.349
+      },
+      "weights_used": {
+        "text": 0.45,
+        "graph": 0.0,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
+      }
+    },
+    {
+      "user_id": "8006a1c7-0577-4ade-bbfa-54d14117ee10",
+      "username": "Razu987",
+      "full_name": "Razu shrestha",
+      "affinity_score": 0.0,
+      "mutual_count": 0,
+      "shared_tags": [],
+      "reason": "Suggested for you",
+      "interests": [],
+      "breakdown": {
+        "text_score": 0.0,
+        "graph_score": 0.0,
+        "adamic_adar": 0.0,
+        "second_degree": 0.0,
+        "interest_score": 0.0,
+        "location_score": 0.0,
+        "interaction_score": 0.0,
+        "collab_score": 0.0,
+        "activity_score": 0.0
+      },
+      "weights_used": {
+        "text": 0.45,
+        "graph": 0.0,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
+      }
+    },
+    {
+      "user_id": "2063cd99-867f-49bb-a8cc-e03ddd5bf9ec",
+      "username": "ronit909",
+      "full_name": "Ronit Shrivastav",
+      "affinity_score": 0.0,
+      "mutual_count": 0,
+      "shared_tags": [],
+      "reason": "Suggested for you",
+      "interests": [],
+      "breakdown": {
+        "text_score": 0.0,
+        "graph_score": 0.0,
+        "adamic_adar": 0.0,
+        "second_degree": 0.0,
+        "interest_score": 0.0,
+        "location_score": 0.0,
+        "interaction_score": 0.0,
+        "collab_score": 0.0,
+        "activity_score": 0.0
+      },
+      "weights_used": {
+        "text": 0.45,
+        "graph": 0.0,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
+      }
+    },
+    {
+      "user_id": "3d5f6ec0-c242-4c6f-8086-98d60067d66d",
+      "username": "innovator",
+      "full_name": null,
+      "affinity_score": 0.0,
+      "mutual_count": 0,
+      "shared_tags": [],
+      "reason": "Suggested for you",
+      "interests": [],
+      "breakdown": {
+        "text_score": 0.0,
+        "graph_score": 0.0,
+        "adamic_adar": 0.0,
+        "second_degree": 0.0,
+        "interest_score": 0.0,
+        "location_score": 0.0,
+        "interaction_score": 0.0,
+        "collab_score": 0.0,
+        "activity_score": 0.0
+      },
+      "weights_used": {
+        "text": 0.45,
+        "graph": 0.0,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
+      }
+    },
+    {
+      "user_id": "0b3cdc92-f423-4f48-89d9-d0094c287cde",
+      "username": "innovator_admin",
+      "full_name": null,
+      "affinity_score": 0.0,
+      "mutual_count": 0,
+      "shared_tags": [],
+      "reason": "Suggested for you",
+      "interests": [],
+      "breakdown": {
+        "text_score": 0.0,
+        "graph_score": 0.0,
+        "adamic_adar": 0.0,
+        "second_degree": 0.0,
+        "interest_score": 0.0,
+        "location_score": 0.0,
+        "interaction_score": 0.0,
+        "collab_score": 0.0,
+        "activity_score": 0.0
+      },
+      "weights_used": {
+        "text": 0.45,
+        "graph": 0.0,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
+      }
+    },
+    {
+      "user_id": "5187df2b-9a75-4cc2-bcbf-65f89d4586ec",
+      "username": "Teacher5",
+      "full_name": null,
+      "affinity_score": 0.0,
+      "mutual_count": 0,
+      "shared_tags": [],
+      "reason": "Suggested for you",
+      "interests": [],
+      "breakdown": {
+        "text_score": 0.0,
+        "graph_score": 0.0,
+        "adamic_adar": 0.0,
+        "second_degree": 0.0,
+        "interest_score": 0.0,
+        "location_score": 0.0,
+        "interaction_score": 0.0,
+        "collab_score": 0.0,
+        "activity_score": 0.0
+      },
+      "weights_used": {
+        "text": 0.45,
+        "graph": 0.0,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
+      }
+    },
+    {
+      "user_id": "e78a2ea7-822f-4fbf-8090-0f61a4dcb5e5",
+      "username": "Prasiddha2310",
+      "full_name": null,
+      "affinity_score": 0.0,
+      "mutual_count": 0,
+      "shared_tags": [],
+      "reason": "Suggested for you",
+      "interests": [],
+      "breakdown": {
+        "text_score": 0.0,
+        "graph_score": 0.0,
+        "adamic_adar": 0.0,
+        "second_degree": 0.0,
+        "interest_score": 0.0,
+        "location_score": 0.0,
+        "interaction_score": 0.0,
+        "collab_score": 0.0,
+        "activity_score": 0.0
+      },
+      "weights_used": {
+        "text": 0.45,
+        "graph": 0.0,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
+      }
+    }
+  ]
+}

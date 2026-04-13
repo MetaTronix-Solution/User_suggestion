@@ -1,331 +1,198 @@
-# User Suggestion API
+# 👥 User Suggestion Engine
 
-A FastAPI-based REST API for computing personalized user recommendations using hybrid recommendation algorithms combining text similarity, graph-based scoring, collaborative filtering, and interest overlap.
+A multi-signal, graph-aware friend recommendation system for social platforms. It combines semantic text embeddings, social graph analysis, interest overlap, location proximity, interaction history, and collaborative filtering into a single affinity score — with a 3-tier fallback to handle cold-start users.
+
+---
 
 ## Features
 
-- **Hybrid Recommendations**: Combines multiple algorithms for better accuracy
-  - Text similarity (bio, education, occupation, hobbies)
-  - Graph-based scoring (mutual connections)
-  - Interest overlap
-  - Collaborative filtering (shared followers)
-- **RESTful API endpoints**: Easy integration with frontend and other services
-- **Configurable result size**: Get top N suggestions
-- **Detailed scoring breakdown**: See how each recommendation score is calculated
-- **Auto-generated API documentation**: Interactive Swagger UI at /docs
+- **3-Tier Candidate Generation** — BFS depth-2 graph traversal → interest cluster matching → random fallback for cold-start users
+- **7-Signal Affinity Scoring** — blends text similarity, graph topology, interest tags, location, interactions, collaborative filtering, and activity
+- **Adaptive Weight Blending** — automatically shifts weight toward graph signals for well-connected users and toward text/interest signals for new users
+- **Adamic-Adar Graph Scoring** — penalises hub nodes; rewards meaningful shared connections
+- **Semantic Embeddings** — `all-MiniLM-L6-v2` encodes bio, education, occupation, hobbies, and location into a 384-dim vector
+- **Diversity Pass** — post-ranking Jaccard deduplication prevents interest-homogeneous result sets
+- **Reason Labels** — every suggestion surfaces a human-readable explanation (e.g. *"3 mutual friends incl. Jane Doe · Both into Photography"*)
 
-## Prerequisites
+---
 
-- Python 3.8+
-- PostgreSQL database (with social_db schema)
-- pip or conda for package management
-
-## Installation
-
-### 1. Clone the Repository
+## Requirements
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/innovator.git
-cd innovator
+pip install psycopg2-binary pandas numpy scikit-learn networkx sentence-transformers
 ```
 
-### 2. Create Virtual Environment
+| Package | Purpose |
+|---|---|
+| `psycopg2` | PostgreSQL connection |
+| `pandas` | Tabular data handling |
+| `numpy` | Vector operations |
+| `scikit-learn` | Cosine similarity |
+| `networkx` | Social graph construction |
+| `sentence-transformers` | Text embedding model |
 
-**Windows (PowerShell):**
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
+---
+
+## Database Schema (Expected Tables)
+
+| Table | Key Columns |
+|---|---|
+| `social_media_user` | `id`, `username`, `full_name`, `hobbies`, `address` |
+| `social_media_profile` | `user_id`, `bio`, `education`, `occupation` |
+| `social_media_profile_interests` | `profile_id`, `category_id` |
+| `social_media_user_following` | `from_user_id`, `to_user_id` |
+| `social_media_user_blocked_users` | `from_user_id`, `to_user_id` |
+| `social_media_post` | `user_id`, `created_at` |
+| `social_media_reaction` | `post_id` |
+| `social_media_like` | `user_id`, `post_id` |
+| `social_media_comment` | `user_id`, `post_id` |
+
+---
+
+## Configuration
+
+Edit the connection block at the top of the script:
+
+```python
+conn = psycopg2.connect(
+    host="YOUR_HOST",
+    port=5436,
+    dbname="YOUR_DB",
+    user="YOUR_USER",
+    password="YOUR_PASSWORD"
+)
 ```
 
-**Mac/Linux:**
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
+---
 
-### 3. Install Dependencies
+## Usage
 
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configure Environment Variables
-
-Copy the example environment file and update with your database credentials:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your database connection details:
-
-```
-DB_HOST=your_host
-DB_PORT=5436
-DB_NAME=social_db
-DB_USER=your_username
-DB_PASSWORD=your_password
-```
-
-## Running the API
-
-### Development Server
-
-```bash
-python api_app.py
-```
-
-Or with auto-reload:
+### Run directly
 
 ```bash
-uvicorn api_app:app --reload
+python suggestion_engine.py
 ```
 
-The API will be available at `http://localhost:5000`
+Set your target user and result count in the `__main__` block:
 
-Interactive API docs: `http://localhost:5000/docs`
-
-### Production Deployment
-
-For production, use uvicorn with multiple worker processes:
-
-```bash
-pip install gunicorn
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker api_app:app
+```python
+TARGET_USER_ID = "your-user-uuid-here"
+TOP_N = 10
 ```
 
-## API Endpoints
+Output is printed to the console and saved to `suggestions.json`.
 
-### 1. Health Check
+### Call as a module
 
-**GET** `/health`
+```python
+from suggestion_engine import compute_user_suggestions
 
-Check if the API is running.
+suggestions = compute_user_suggestions(target_user_id="uuid-here", top_n=10)
+for s in suggestions:
+    print(s["full_name"], s["affinity_score"], s["reason"])
+```
 
-**Response:**
+---
+
+## Output Format
+
+`suggestions.json` and the return value of `compute_user_suggestions()` share the same structure:
+
 ```json
 {
-  "status": "healthy",
-  "message": "API is running"
-}
-```
-
-### 2. Get Suggestions
-
-**GET** `/api/suggestions/<target_user_id>`
-
-Get top recommendations for a specific user.
-
-**Query Parameters:**
-- `top_n` (int, optional): Number of suggestions to return. Default: 5. Max: 50
-
-**Example:**
-```
-GET /api/suggestions/bd4cade0-3abd-45e5-a1c0-30f8c64681cd?top_n=10
-```
-
-**Response:**
-```json
-{
-  "target_user_id": "bd4cade0-3abd-45e5-a1c0-30f8c64681cd",
-  "count": 5,
+  "target_user_id": "...",
+  "generated_at": "2025-01-01T00:00:00",
+  "total": 10,
   "suggestions": [
     {
-      "user_id": "user-id-1",
+      "user_id": "...",
       "username": "john_doe",
       "full_name": "John Doe",
-      "score": 0.85,
+      "affinity_score": 0.7241,
+      "mutual_count": 3,
+      "shared_tags": [42, 17],
+      "reason": "3 mutual friends incl. Jane Smith · Both into 42 + 17",
+      "interests": [42, 17, 88],
       "breakdown": {
-        "text_score": 0.80,
-        "graph_score": 0.90,
-        "interest_score": 0.85,
-        "collab_score": 0.75
-      }
-    },
-    ...
-  ]
-}
-```
-
-### 3. Get Detailed Suggestions
-
-**GET** `/api/suggestions/<target_user_id>/detailed`
-
-Same as above but includes formatted percentage breakdowns for easier frontend rendering.
-
-**Response:**
-```json
-{
-  "target_user_id": "bd4cade0-3abd-45e5-a1c0-30f8c64681cd",
-  "count": 5,
-  "suggestions": [
-    {
-      "user_id": "user-id-1",
-      "username": "john_doe",
-      "full_name": "John Doe",
-      "score": 0.85,
-      "breakdown": {
-        "text_score": 0.80,
-        "graph_score": 0.90,
-        "interest_score": 0.85,
-        "collab_score": 0.75,
-        "visual_score": {
-          "text": "80.0%",
-          "graph": "90.0%",
-          "interest": "85.0%",
-          "collab": "75.0%"
-        }
+        "text_score": 0.812,
+        "graph_score": 0.540,
+        "adamic_adar": 0.600,
+        "second_degree": 0.450,
+        "interest_score": 0.667,
+        "location_score": 0.600,
+        "interaction_score": 0.000,
+        "collab_score": 0.250,
+        "activity_score": 0.730
+      },
+      "weights_used": {
+        "text": 0.2,
+        "graph": 0.25,
+        "interest": 0.2,
+        "location": 0.08,
+        "interaction": 0.1,
+        "collab": 0.07,
+        "activity": 0.05
       }
     }
   ]
 }
 ```
 
-### 4. Get API Stats
+---
 
-**GET** `/api/stats`
-
-Get API version and endpoint information.
-
-**Response:**
-```json
-{
-  "api_version": "1.0.0",
-  "endpoints": [
-    "/health",
-    "/api/suggestions/<user_id>",
-    "/api/suggestions/<user_id>/detailed",
-    "/api/stats"
-  ],
-  "docs": "/docs"
-}
-```
-
-## Scoring Algorithm
-
-The recommendation score is a weighted combination of four components:
-
-| Component | Weight | Description |
-|-----------|--------|-------------|
-| Text Similarity | 30% | Similarity of bio, education, occupation, hobbies |
-| Graph Score | 30% | Common connections via following relationships |
-| Interest Score | 20% | Overlap in user interests/categories |
-| Collaborative | 20% | Shared followers (collaborative filtering proxy) |
-
-**Final Score = 0.3 × Text + 0.3 × Graph + 0.2 × Interest + 0.2 × Collab**
-
-## Integration Examples
-
-### JavaScript/Node.js
-
-```javascript
-const axios = require('axios');
-
-const API_URL = 'http://localhost:5000/api';
-const userId = 'bd4cade0-3abd-45e5-a1c0-30f8c64681cd';
-
-async function getSuggestions() {
-  try {
-    const response = await axios.get(`${API_URL}/suggestions/${userId}?top_n=5`);
-    console.log(response.data);
-  } catch (error) {
-    console.error('Error fetching suggestions:', error);
-  }
-}
-
-getSuggestions();
-```
-
-### Python
-
-```python
-import requests
-
-API_URL = 'http://localhost:5000/api'
-user_id = 'bd4cade0-3abd-45e5-a1c0-30f8c64681cd'
-
-response = requests.get(f'{API_URL}/suggestions/{user_id}', params={'top_n': 5})
-suggestions = response.json()
-print(suggestions)
-```
-
-### cURL
-
-```bash
-curl -X GET "http://localhost:5000/api/suggestions/bd4cade0-3abd-45e5-a1c0-30f8c64681cd?top_n=5"
-```
-
-## Project Structure
+## Architecture
 
 ```
-innovator/
-├── api_app.py                          # Main Flask application
-├── app.py                              # Legacy/utility app
-├── abc.py                              # Utility script
-├── requirements.txt                    # Python dependencies
-├── .env.example                        # Environment variables template
-├── .gitignore                          # Git ignore rules
-├── README.md                           # This file
-└── utils/
-    ├── suggestions.py                  # Core recommendation logic
-    ├── all_users_attributes_v3.csv    # User data cache
-    └── ...
+compute_user_suggestions(target_user_id)
+│
+├── 1. CANDIDATE POOL
+│   ├── Tier 1: BFS depth-2 (friends-of-friends)
+│   ├── Tier 2: Interest cluster (≥1 shared tag)
+│   └── Tier 3: Random fallback (cold-start)
+│
+├── 2. ATTRIBUTE FETCHING
+│   └── Profile, interests, followers, following, activity stats
+│
+├── 3. SIGNAL COMPUTATION (per candidate)
+│   ├── Text similarity     — sentence-transformers cosine similarity
+│   ├── Graph score         — Adamic-Adar (60%) + 2nd-degree Jaccard (40%)
+│   ├── Interest score      — Jaccard over interest tag IDs
+│   ├── Location score      — token overlap on address strings
+│   ├── Interaction score   — likes + weighted comments on target's posts
+│   ├── Collab score        — shared followers (collaborative filtering)
+│   └── Activity score      — post frequency + likes received + recency
+│
+├── 4. WEIGHT BLENDING
+│   └── Network size drives graph ↔ text weight trade-off
+│
+├── 5. RANKING + DIVERSITY PASS
+│   └── Jaccard deduplication across top-40 pool → top-N output
+│
+└── 6. REASON LABEL GENERATION
+    └── Human-readable string from top contributing signals
 ```
 
-## Troubleshooting
+---
 
-### Database Connection Error
-- Verify database credentials in `.env`
-- Ensure PostgreSQL server is running
-- Check database host and port are correct
+## Signal Weights
 
-### Missing Dependencies
-```bash
-pip install -r requirements.txt
-```
+Weights adapt to the user's network size. The table below shows approximate ranges:
 
-### Port Already in Use
-Change the port in `api_app.py`:
-```python
-app.run(debug=True, host='0.0.0.0', port=5001)  # Change port here
-```
+| Signal | Cold-start weight | Established user weight |
+|---|---|---|
+| Text (semantic) | ~0.45 | ~0.10 |
+| Graph (Adamic-Adar + 2nd-degree) | ~0.05 | ~0.40 |
+| Interest (Jaccard) | 0.20 | 0.20 |
+| Interaction | 0.10 | 0.10 |
+| Location | 0.08 | 0.08 |
+| Collaborative filtering | 0.07 | 0.07 |
+| Activity | 0.05 | 0.05 |
 
-## Performance Considerations
+---
 
-- First request may be slow (model loading and CSV parsing)
-- Results are cached in CSV files for faster subsequent requests
-- Consider implementing request caching for frequently requested users
+## Notes
 
-## Future Enhancements
-
-- [ ] Add authentication and rate limiting
-- [ ] Implement caching layer (Redis)
-- [ ] Add user profiles endpoint
-- [ ] Create WebSocket for real-time suggestions
-- [ ] Add CSV data refresh endpoint
-- [ ] Implement pagination for large result sets
-- [ ] Add request logging and monitoring
-
-## Contributing
-
-1. Create a feature branch: `git checkout -b feature/your-feature`
-2. Commit changes: `git commit -am 'Add new feature'`
-3. Push branch: `git push origin feature/your-feature`
-4. Create Pull Request
-
-## License
-
-[Your License Here]
-
-## Support
-
-For issues or questions:
-1. Check the troubleshooting section
-2. Review existing GitHub issues
-3. Create a new issue with detailed information
-
-## Team Information
-
-- **Project**: Innovator - User Recommendation System
-- **Repository**: [GitHub Link](https://github.com/YOUR_USERNAME/innovator)
-- **API Version**: 1.0.0
+- Blocked users and already-followed users are excluded from all candidate tiers.
+- The diversity pass uses a Jaccard threshold of **0.80** — candidates more similar than this to an already-selected result are skipped.
+- The embedding model (`all-MiniLM-L6-v2`) is downloaded automatically by `sentence-transformers` on first run (~80 MB).
+- All database exceptions are caught and rolled back individually; a failure in one signal does not abort the pipeline.

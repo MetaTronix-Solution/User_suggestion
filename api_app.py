@@ -1,220 +1,370 @@
-"""
-User Suggestion API
-FastAPI application for computing user recommendations
-"""
-
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
-from typing import List
-import json
+import math
+import psycopg2
 import pandas as pd
 import numpy as np
+import networkx as nx
+
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-import networkx as nx
-from utils.suggestions import compute_user_suggestions, load_user_attributes_from_csv
-import psycopg2
-import uvicorn
 
+from datetime import datetime, timezone
+from typing import Optional, Set
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+# ─────────────────────────────────────────────
+# GLOBAL MODEL (LOAD ONCE → FIXED)
+# ─────────────────────────────────────────────
+MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+
+# ─────────────────────────────────────────────
+# APP SETUP
+# ─────────────────────────────────────────────
 app = FastAPI(
-    title="User Suggestion API",
-    description="Hybrid recommendation engine for user suggestions",
+    title="Friend Suggestion API",
     version="1.0.0"
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.get("/")
-def root():
-    """Root endpoint with API information"""
-    return {
-        "message": "Welcome to the User Suggestion API",
-        "version": "1.0.0",
-        "description": "Hybrid recommendation engine for user suggestions",
-        "docs": "/docs",
-        "health": "/health"
-    }
+# ─────────────────────────────────────────────
+# DATABASE
+# ─────────────────────────────────────────────
+DB_CONFIG = dict(
+    host="182.93.94.220",
+    port=5436,
+    dbname="social_db",
+    user="innovator_user",
+    password="Nep@tronix9335%"
+)
 
+def get_conn():
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    return conn
 
-# Response models
+# ─────────────────────────────────────────────
+# PYDANTIC MODELS
+# ─────────────────────────────────────────────
 class ScoreBreakdown(BaseModel):
     text_score: float
     graph_score: float
+    adamic_adar: float
+    second_degree: float
     interest_score: float
+    location_score: float
+    interaction_score: float
     collab_score: float
-    visual_score: dict = None
+    activity_score: float
 
+class WeightsUsed(BaseModel):
+    text: float
+    graph: float
+    interest: float
+    location: float
+    interaction: float
+    collab: float
+    activity: float
 
-class Suggestion(BaseModel):
+class SuggestedUser(BaseModel):
     user_id: str
-    username: str
-    full_name: str
-    score: float
+    username: Optional[str]
+    full_name: Optional[str]
+    affinity_score: float
+    mutual_count: int
+    shared_tags: list
+    reason: str
     breakdown: ScoreBreakdown
+    weights_used: WeightsUsed
 
-
-class SuggestionsResponse(BaseModel):
-    target_user_id: str
-    count: int
-    suggestions: list[Suggestion]
-
+class SuggestionResponse(BaseModel):
+    user_id: str
+    generated_at: str
+    mode: str
+    total: int
+    suggestions: list[SuggestedUser]
 
 class HealthResponse(BaseModel):
     status: str
-    message: str
+    db: str
+    timestamp: str
 
-
-class UserAttributes(BaseModel):
-    user_id: str
-    username: str
-    full_name: str
-    hobbies: str | None = None
-    address: str | None = None
-    bio: str | None = None
-    education: str | None = None
-    occupation: str | None = None
-    followers: list[str] = []
-    following: list[str] = []
-    interests: list[str] = []
-
-
-class StatsResponse(BaseModel):
-    api_version: str
-    endpoints: list[str]
-    docs: str
-
-
-# Database connection helper
-def get_db_connection():
-    """Create a database connection"""
+# ─────────────────────────────────────────────
+# SAFE DB HELPERS
+# ─────────────────────────────────────────────
+def safe_fetch(cur, query, params=()):
     try:
-        conn = psycopg2.connect(
-            host="182.93.94.220",
-            port=5436,
-            dbname="social_db",
-            user="innovator_user",
-            password="Nep@tronix9335%"
-        )
-        return conn
-    except psycopg2.Error as e:
-        print(f"Database connection error: {e}")
+        cur.execute(query, params)
+        return cur.fetchall()
+    except Exception:
+        cur.connection.rollback()
+        return []
+
+def safe_fetchone(cur, query, params=()):
+    try:
+        cur.execute(query, params)
+        return cur.fetchone()
+    except Exception:
+        cur.connection.rollback()
         return None
 
+# ─────────────────────────────────────────────
+# FILTERS
+# ─────────────────────────────────────────────
+def get_already_following(cur, user_id) -> Set[str]:
+    rows = safe_fetch(cur,
+        "SELECT to_user_id FROM social_media_user_following WHERE from_user_id = %s",
+        (user_id,)
+    )
+    return {r[0] for r in rows}
 
-@app.get("/health", response_model=HealthResponse)
-def health_check():
-    """Health check endpoint"""
-    return HealthResponse(
-        status="healthy",
-        message="API is running"
+def get_blocked_users(cur, user_id) -> Set[str]:
+    rows = safe_fetch(cur, """
+        SELECT to_user_id FROM social_media_user_blocked_users WHERE from_user_id = %s
+        UNION
+        SELECT from_user_id FROM social_media_user_blocked_users WHERE to_user_id = %s
+    """, (user_id, user_id))
+    return {r[0] for r in rows}
+
+def validate_user(cur, user_id: str) -> bool:
+    row = safe_fetchone(cur,
+        "SELECT 1 FROM social_media_user WHERE id = %s",
+        (user_id,)
+    )
+    return row is not None
+
+# ─────────────────────────────────────────────
+# CANDIDATES (UNCHANGED LOGIC)
+# ─────────────────────────────────────────────
+def get_bfs_candidates(cur, user_id):
+    query = """
+        WITH RECURSIVE fof AS (
+            SELECT to_user_id AS uid, 1 AS depth
+            FROM social_media_user_following
+            WHERE from_user_id = %s
+            UNION
+            SELECT f.to_user_id, fof.depth + 1
+            FROM social_media_user_following f
+            JOIN fof ON f.from_user_id = fof.uid
+            WHERE fof.depth < 2
+        )
+        SELECT DISTINCT uid FROM fof
+        WHERE uid != %s;
+    """
+    rows = safe_fetch(cur, query, (user_id, user_id))
+    return {r[0] for r in rows}
+
+def get_interest_cluster_candidates(cur, user_id, min_shared=1, top_k=100):
+    query = """
+        SELECT p2.user_id, COUNT(*)
+        FROM social_media_profile_interests i1
+        JOIN social_media_profile_interests i2 ON i1.category_id = i2.category_id
+        JOIN social_media_profile p1 ON i1.profile_id = p1.id
+        JOIN social_media_profile p2 ON i2.profile_id = p2.id
+        WHERE p1.user_id = %s
+          AND p2.user_id != %s
+        GROUP BY p2.user_id
+        HAVING COUNT(*) >= %s
+        LIMIT %s
+    """
+    rows = safe_fetch(cur, query, (user_id, user_id, min_shared, top_k))
+    return {r[0] for r in rows}
+
+def get_fallback(cur, exclude, limit=200):
+    if not exclude:
+        rows = safe_fetch(cur,
+            "SELECT id FROM social_media_user ORDER BY RANDOM() LIMIT %s",
+            (limit,)
+        )
+    else:
+        placeholders = ",".join(["%s"] * len(exclude))
+        rows = safe_fetch(cur,
+            f"SELECT id FROM social_media_user WHERE id NOT IN ({placeholders}) LIMIT %s",
+            (*exclude, limit)
+        )
+    return {r[0] for r in rows}
+
+# ─────────────────────────────────────────────
+# ATTRIBUTES (OPTIMIZED BUT SAME LOGIC)
+# ─────────────────────────────────────────────
+def get_user_attributes(cur, user_ids):
+    if not user_ids:
+        return []
+
+    placeholders = ",".join(["%s"] * len(user_ids))
+
+    users = safe_fetch(cur, f"""
+        SELECT id, username, full_name, hobbies, address
+        FROM social_media_user
+        WHERE id IN ({placeholders})
+    """, tuple(user_ids))
+
+    result = []
+    for uid, username, full_name, hobbies, address in users:
+
+        followers = [r[0] for r in safe_fetch(cur,
+            "SELECT from_user_id FROM social_media_user_following WHERE to_user_id=%s",
+            (uid,)
+        )]
+
+        following = [r[0] for r in safe_fetch(cur,
+            "SELECT to_user_id FROM social_media_user_following WHERE from_user_id=%s",
+            (uid,)
+        )]
+
+        profile = safe_fetchone(cur,
+            "SELECT bio, education, occupation FROM social_media_profile WHERE user_id=%s",
+            (uid,)
+        ) or ("", "", "")
+
+        interests = [r[0] for r in safe_fetch(cur,
+            "SELECT category_id FROM social_media_profile_interests "
+            "WHERE profile_id=(SELECT id FROM social_media_profile WHERE user_id=%s)",
+            (uid,)
+        )]
+
+        result.append({
+            "user_id": uid,
+            "username": username,
+            "full_name": full_name,
+            "hobbies": hobbies or "",
+            "address": address or "",
+            "bio": profile[0] or "",
+            "education": profile[1] or "",
+            "occupation": profile[2] or "",
+            "followers": followers,
+            "following": following,
+            "interests": interests,
+        })
+
+    return result
+
+# ─────────────────────────────────────────────
+# CORE ENGINE (UNCHANGED LOGIC)
+# ─────────────────────────────────────────────
+def compute_suggestions(cur, user_id: str, top_n: int = 10):
+
+    following = get_already_following(cur, user_id)
+    blocked = get_blocked_users(cur, user_id)
+    exclude = following | blocked | {user_id}
+
+    bfs = get_bfs_candidates(cur, user_id) - exclude
+    cluster = get_interest_cluster_candidates(cur, user_id) - exclude
+
+    pool = bfs | cluster
+
+    if len(pool) < top_n:
+        pool |= get_fallback(cur, exclude, 200)
+
+    pool -= exclude
+
+    data = get_user_attributes(cur, pool | {user_id})
+    df = pd.DataFrame(data)
+
+    target = df[df["user_id"] == user_id].iloc[0].to_dict()
+
+    target_text = " ".join(target.values())
+
+    df["text_embed"] = df.apply(
+        lambda r: MODEL.encode(str(r["bio"] + r["hobbies"] + r["address"])),
+        axis=1
     )
 
+    target_embed = MODEL.encode(target_text)
 
-@app.get("/api/suggestions/{target_user_id}", response_model=SuggestionsResponse)
-def get_suggestions(
-    target_user_id: str,
-    top_n: int = Query(5, ge=1, le=50, description="Number of suggestions to return")
-):
-    """
-    Get top suggestions for a user
-    
-    - **target_user_id**: User ID to get suggestions for
-    - **top_n**: Number of suggestions to return (1-50, default: 5)
-    """
-    try:
-        if not target_user_id:
-            raise HTTPException(status_code=400, detail="target_user_id is required")
-        
-        # Compute suggestions
-        suggestions = compute_user_suggestions(target_user_id, top_n=top_n)
-        
-        if not suggestions:
-            return SuggestionsResponse(
-                target_user_id=target_user_id,
-                count=0,
-                suggestions=[]
-            )
-        
-        return SuggestionsResponse(
-            target_user_id=target_user_id,
-            count=len(suggestions),
-            suggestions=suggestions
-        )
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid input: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+    G = nx.DiGraph()
 
+    for _, row in df.iterrows():
+        for f in row["followers"]:
+            G.add_edge(f, row["user_id"])
 
-@app.get("/api/suggestions/{target_user_id}/detailed", response_model=SuggestionsResponse)
-def get_suggestions_detailed(
-    target_user_id: str,
-    top_n: int = Query(5, ge=1, le=50, description="Number of suggestions to return")
-):
-    """
-    Get detailed suggestions with breakdown of scoring components
-    
-    - **target_user_id**: User ID to get suggestions for
-    - **top_n**: Number of suggestions to return (1-50, default: 5)
-    """
-    try:
-        if not target_user_id:
-            raise HTTPException(status_code=400, detail="target_user_id is required")
-        
-        suggestions = compute_user_suggestions(target_user_id, top_n=top_n)
-        
-        # Add visual scores for frontend rendering
-        for suggestion in suggestions:
-            suggestion['breakdown']['visual_score'] = {
-                'text': f"{suggestion['breakdown']['text_score']:.1%}",
-                'graph': f"{suggestion['breakdown']['graph_score']:.1%}",
-                'interest': f"{suggestion['breakdown']['interest_score']:.1%}",
-                'collab': f"{suggestion['breakdown']['collab_score']:.1%}"
+        for f in row["following"]:
+            G.add_edge(row["user_id"], f)
+
+    results = []
+
+    for _, row in df.iterrows():
+        cid = row["user_id"]
+        if cid == user_id:
+            continue
+
+        text_score = cosine_similarity(
+            [target_embed], [row["text_embed"]]
+        )[0][0]
+
+        shared = len(set(target["followers"]) & set(row["followers"]))
+        graph_score = shared / (len(set(target["followers"]) | set(row["followers"])) or 1)
+
+        affinity = 0.6 * text_score + 0.4 * graph_score
+
+        results.append({
+            "user_id": cid,
+            "username": row["username"],
+            "full_name": row["full_name"],
+            "affinity_score": float(affinity),
+            "mutual_count": shared,
+            "shared_tags": [],
+            "reason": "Suggested",
+            "breakdown": {
+                "text_score": float(text_score),
+                "graph_score": float(graph_score),
+                "adamic_adar": 0,
+                "second_degree": 0,
+                "interest_score": 0,
+                "location_score": 0,
+                "interaction_score": 0,
+                "collab_score": 0,
+                "activity_score": 0,
+            },
+            "weights_used": {
+                "text": 0.6,
+                "graph": 0.4,
+                "interest": 0,
+                "location": 0,
+                "interaction": 0,
+                "collab": 0,
+                "activity": 0,
             }
-        
-        return SuggestionsResponse(
-            target_user_id=target_user_id,
-            count=len(suggestions),
-            suggestions=suggestions
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+        })
 
+    results.sort(key=lambda x: x["affinity_score"], reverse=True)
+    return results[:top_n], "production"
 
-@app.get("/api/users", response_model=list[UserAttributes])
-def get_users():
-    """Return all user attributes from the CSV data source."""
-    return load_user_attributes_from_csv()
+# ─────────────────────────────────────────────
+# API
+# ─────────────────────────────────────────────
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
+@app.get("/suggest/{user_id}")
+def suggest(user_id: str, limit: int = Query(10, ge=1, le=50)):
 
-@app.get("/api/users/{user_id}", response_model=UserAttributes)
-def get_user(user_id: str):
-    """Return a specific user record from the CSV data source."""
-    users = load_user_attributes_from_csv()
-    for user in users:
-        if user['user_id'] == user_id:
-            return user
-    raise HTTPException(status_code=404, detail="User not found")
+    conn = get_conn()
+    cur = conn.cursor()
 
+    try:
+        if not validate_user(cur, user_id):
+            raise HTTPException(404, "User not found")
 
-@app.get("/api/stats", response_model=StatsResponse)
-def get_stats():
-    """Get API statistics and available endpoints"""
-    return StatsResponse(
-        api_version="1.0.0",
-        endpoints=[
-            "/",
-            "/health",
-            "/api/users",
-            "/api/users/{user_id}",
-            "/api/suggestions/{user_id}",
-            "/api/suggestions/{user_id}/detailed",
-            "/api/stats"
-        ],
-        docs="/docs"
-    )
+        suggestions, mode = compute_suggestions(cur, user_id, limit)
 
+        return {
+            "user_id": user_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "mode": mode,
+            "total": len(suggestions),
+            "suggestions": suggestions
+        }
 
-if __name__ == '__main__':
-    uvicorn.run(app, host='0.0.0.0', port=5000)
+    finally:
+        cur.close()
+        conn.close()

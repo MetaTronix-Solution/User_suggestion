@@ -12,7 +12,7 @@ from datetime import datetime
 # ─────────────────────────────────────────────
 # MODEL (LOAD ONCE)
 # ─────────────────────────────────────────────
-MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+
 
 # ─────────────────────────────────────────────
 # DB CONFIG
@@ -25,15 +25,29 @@ DB_CONFIG = dict(
     password="Nep@tronix9335%"
 )
 
-conn = psycopg2.connect(**DB_CONFIG)
-conn.autocommit = True
-cur = conn.cursor()
+MODEL = None
+conn = None
+cur = None
 
+def get_model():
+    global MODEL
+    if MODEL is None:
+        MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    return MODEL
+
+def get_db():
+    global conn, cur
+    if conn is None:
+        conn = psycopg2.connect(**DB_CONFIG)
+        conn.autocommit = True
+        cur = conn.cursor()
+    return conn, cur
 # ─────────────────────────────────────────────
 # SAFE DB
 # ─────────────────────────────────────────────
 def safe_fetch(query, params=()):
     try:
+        _, cur = get_db()
         cur.execute(query, params)
         return cur.fetchall()
     except Exception:
@@ -42,6 +56,7 @@ def safe_fetch(query, params=()):
 
 def safe_fetchone(query, params=()):
     try:
+        _, cur = get_db()
         cur.execute(query, params)
         return cur.fetchone()
     except Exception:
@@ -259,10 +274,10 @@ def compute_user_suggestions(user_id, top_n=10):
     df["text"] = df.apply(safe_text, axis=1)
 
     df["embed"] = df["text"].apply(
-        lambda x: MODEL.encode(x) if x.strip() else np.zeros(384)
+        lambda x: get_model().encode(x) if x.strip() else np.zeros(384)
     )
 
-    target_embed = MODEL.encode(safe_text(target))
+    target_embed = get_model().encode(safe_text(target))
 
     G = nx.DiGraph()
 

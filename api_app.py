@@ -17,7 +17,14 @@ from pydantic import BaseModel
 # ─────────────────────────────────────────────
 # GLOBAL MODEL (LOAD ONCE → FIXED)
 # ─────────────────────────────────────────────
-MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+# MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+MODEL = None
+
+def get_model():
+    global MODEL
+    if MODEL is None:
+        MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    return MODEL
 
 # ─────────────────────────────────────────────
 # APP SETUP
@@ -274,11 +281,11 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
     target_text = " ".join(target.values())
 
     df["text_embed"] = df.apply(
-        lambda r: MODEL.encode(str(r["bio"] + r["hobbies"] + r["address"])),
+        lambda r: get_model().encode(str(r["bio"] + r["hobbies"] + r["address"])),
         axis=1
     )
 
-    target_embed = MODEL.encode(target_text)
+    target_embed = get_model().encode(target_text)
 
     G = nx.DiGraph()
 

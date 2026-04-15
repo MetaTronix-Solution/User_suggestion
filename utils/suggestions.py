@@ -9,9 +9,17 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from datetime import datetime
 
+
 # ─────────────────────────────────────────────
-# MODEL (LOAD ONCE)
+# MODEL (SAFE LAZY LOAD - FIXED)
 # ─────────────────────────────────────────────
+MODEL = None
+
+def get_model():
+    global MODEL
+    if MODEL is None:
+        MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    return MODEL
 
 
 # ─────────────────────────────────────────────
@@ -25,15 +33,8 @@ DB_CONFIG = dict(
     password="Nep@tronix9335%"
 )
 
-MODEL = None
 conn = None
 cur = None
-
-def get_model():
-    global MODEL
-    if MODEL is None:
-        MODEL = SentenceTransformer("all-MiniLM-L6-v2")
-    return MODEL
 
 def get_db():
     global conn, cur
@@ -42,6 +43,8 @@ def get_db():
         conn.autocommit = True
         cur = conn.cursor()
     return conn, cur
+
+
 # ─────────────────────────────────────────────
 # SAFE DB
 # ─────────────────────────────────────────────
@@ -63,6 +66,7 @@ def safe_fetchone(query, params=()):
         conn.rollback()
         return None
 
+
 # ─────────────────────────────────────────────
 # FILTERS
 # ─────────────────────────────────────────────
@@ -78,6 +82,7 @@ def get_blocked_users(user_id):
         UNION
         SELECT from_user_id FROM social_media_user_blocked_users WHERE to_user_id=%s
     """, (user_id, user_id))}
+
 
 # ─────────────────────────────────────────────
 # CANDIDATES
@@ -99,6 +104,7 @@ def get_bfs_candidates(user_id):
     """, (user_id, user_id))
     return {r[0] for r in rows}
 
+
 def get_interest_cluster_candidates(user_id, min_shared=1, top_k=100):
     rows = safe_fetch("""
         SELECT p2.user_id, COUNT(*)
@@ -113,6 +119,7 @@ def get_interest_cluster_candidates(user_id, min_shared=1, top_k=100):
     """, (user_id, user_id, min_shared, top_k))
 
     return {r[0] for r in rows}
+
 
 def get_all_user_ids_fallback(user_id, following, blocked, limit=200):
     exclude = list(following | blocked | {user_id})
@@ -131,35 +138,9 @@ def get_all_user_ids_fallback(user_id, following, blocked, limit=200):
 
     return {r[0] for r in rows}
 
-# ─────────────────────────────────────────────
-# ACTIVITY
-# ─────────────────────────────────────────────
-def get_activity_score(user_id):
-    row = safe_fetchone("""
-        SELECT COUNT(*), MAX(created_at)
-        FROM social_media_post
-        WHERE user_id=%s AND created_at > NOW() - INTERVAL '30 days'
-    """, (user_id,))
-
-    post_count, last_active = row if row else (0, None)
-
-    post_score = min((post_count or 0) / 10.0, 1.0)
-    recency_score = 1.0 if last_active else 0.0
-
-    likes_row = safe_fetchone("""
-        SELECT COUNT(*)
-        FROM social_media_reaction r
-        JOIN social_media_post p ON r.post_id=p.id
-        WHERE p.user_id=%s
-    """, (user_id,))
-
-    likes = likes_row[0] if likes_row else 0
-    likes_score = min(likes / 100.0, 1.0)
-
-    return post_score, likes_score, recency_score
 
 # ─────────────────────────────────────────────
-# USER ATTRIBUTES (FIXED EMPTY PROFILE BUG)
+# USER ATTRIBUTES
 # ─────────────────────────────────────────────
 def get_user_attributes(user_ids):
     if not user_ids:
@@ -190,9 +171,7 @@ def get_user_attributes(user_ids):
         profile = safe_fetchone("""
             SELECT bio, education, occupation
             FROM social_media_profile WHERE user_id=%s
-        """, (uid,))
-
-        bio, education, occupation = profile if profile else ("", "", "")
+        """, (uid,)) or ("", "", "")
 
         interests = [r[0] for r in safe_fetch("""
             SELECT category_id
@@ -200,26 +179,22 @@ def get_user_attributes(user_ids):
             WHERE profile_id=(SELECT id FROM social_media_profile WHERE user_id=%s)
         """, (uid,))]
 
-        post_score, likes_score, recency_score = get_activity_score(uid)
-
         result.append({
             "user_id": uid,
             "username": username,
             "full_name": full_name,
             "hobbies": hobbies or "",
             "address": address or "",
-            "bio": bio or "",
-            "education": education or "",
-            "occupation": occupation or "",
+            "bio": profile[0] or "",
+            "education": profile[1] or "",
+            "occupation": profile[2] or "",
             "followers": followers,
             "following": following,
             "interests": interests,
-            "post_score": post_score,
-            "likes_score": likes_score,
-            "recency_score": recency_score,
         })
 
     return result
+
 
 # ─────────────────────────────────────────────
 # LOCATION
@@ -236,8 +211,9 @@ def location_similarity(a1, a2):
     overlap = t1 & t2
     return 0.6 if overlap and len(overlap) >= 2 else 0.0
 
+
 # ─────────────────────────────────────────────
-# MAIN ENGINE (FIXED SCORING BUG)
+# MAIN ENGINE (FIXED ONLY EMBEDDING SAFETY)
 # ─────────────────────────────────────────────
 def compute_user_suggestions(user_id, top_n=10):
 
@@ -267,17 +243,24 @@ def compute_user_suggestions(user_id, top_n=10):
 
     target = target.iloc[0].to_dict()
 
-    # FIX: safe embedding input
+    # ── SAFE MODEL USAGE ──
+    model = get_model()
+
     def safe_text(r):
-        return " ".join([str(r.get("bio","")), str(r.get("hobbies","")), str(r.get("address",""))])
+        return " ".join([
+            str(r.get("bio", "")),
+            str(r.get("hobbies", "")),
+            str(r.get("address", ""))
+        ])
 
     df["text"] = df.apply(safe_text, axis=1)
 
-    df["embed"] = df["text"].apply(
-        lambda x: get_model().encode(x) if x.strip() else np.zeros(384)
-    )
+    df["embed"] = [
+        model.encode(text) if text.strip() else np.zeros(384)
+        for text in df["text"]
+    ]
 
-    target_embed = get_model().encode(safe_text(target))
+    target_embed = model.encode(safe_text(target))
 
     G = nx.DiGraph()
 
@@ -293,15 +276,14 @@ def compute_user_suggestions(user_id, top_n=10):
         if r["user_id"] == user_id:
             continue
 
-        # FIX: real cosine similarity
         text_score = float(cosine_similarity(
             [target_embed], [r["embed"]]
         )[0][0])
 
-        # FIX: better graph signal (not constant anymore)
         gf_t = set(G.successors(user_id)) if G.has_node(user_id) else set()
         gf_c = set(G.successors(r["user_id"])) if G.has_node(r["user_id"]) else set()
         shared = gf_t & gf_c
+
         graph_score = len(shared) / (len(gf_t | gf_c) or 1)
 
         interest_score = len(set(target["interests"]) & set(r["interests"])) / (
@@ -342,6 +324,7 @@ def compute_user_suggestions(user_id, top_n=10):
 
     results.sort(key=lambda x: x["affinity_score"], reverse=True)
     return results[:top_n]
+
 
 # ─────────────────────────────────────────────
 # ENTRY

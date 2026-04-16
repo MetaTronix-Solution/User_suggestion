@@ -1,12 +1,9 @@
 import os
-import math
 import psycopg2
 import pandas as pd
-import numpy as np
 import networkx as nx
-import asyncio
 
-from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from datetime import datetime, timezone
@@ -15,18 +12,6 @@ from typing import Optional, Set
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-
-# ─────────────────────────────────────────────
-# GLOBAL MODEL (SAFE + FAST STARTUP)
-# ─────────────────────────────────────────────
-MODEL = None
-
-def get_model():
-    global MODEL
-    if MODEL is None:
-        MODEL = SentenceTransformer("all-MiniLM-L6-v2")
-    return MODEL
-
 
 # ─────────────────────────────────────────────
 # APP SETUP
@@ -44,16 +29,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ─────────────────────────────────────────────
-# LOAD MODEL ON STARTUP (IMPORTANT FIX FOR RENDER)
-# ─────────────────────────────────────────────
-@app.on_event("startup")
-def startup_event():
-    global MODEL
-    MODEL = SentenceTransformer("all-MiniLM-L6-v2")
-
-
 # ─────────────────────────────────────────────
 # DATABASE
 # ─────────────────────────────────────────────
@@ -70,30 +45,9 @@ def get_conn():
     conn.autocommit = True
     return conn
 
-
 # ─────────────────────────────────────────────
-# PYDANTIC MODELS
+# MODELS
 # ─────────────────────────────────────────────
-class ScoreBreakdown(BaseModel):
-    text_score: float
-    graph_score: float
-    adamic_adar: float
-    second_degree: float
-    interest_score: float
-    location_score: float
-    interaction_score: float
-    collab_score: float
-    activity_score: float
-
-class WeightsUsed(BaseModel):
-    text: float
-    graph: float
-    interest: float
-    location: float
-    interaction: float
-    collab: float
-    activity: float
-
 class SuggestedUser(BaseModel):
     user_id: str
     username: Optional[str]
@@ -104,7 +58,6 @@ class SuggestedUser(BaseModel):
     reason: str
     breakdown: dict
     weights_used: dict
-
 
 # ─────────────────────────────────────────────
 # SAFE DB HELPERS
@@ -124,7 +77,6 @@ def safe_fetchone(cur, query, params=()):
     except Exception:
         cur.connection.rollback()
         return None
-
 
 # ─────────────────────────────────────────────
 # FILTERS
@@ -151,7 +103,6 @@ def validate_user(cur, user_id: str) -> bool:
     )
     return row is not None
 
-
 # ─────────────────────────────────────────────
 # CANDIDATES
 # ─────────────────────────────────────────────
@@ -173,20 +124,18 @@ def get_bfs_candidates(cur, user_id):
     rows = safe_fetch(cur, query, (user_id, user_id))
     return {r[0] for r in rows}
 
-def get_interest_cluster_candidates(cur, user_id, min_shared=1, top_k=100):
+def get_interest_cluster_candidates(cur, user_id):
     query = """
         SELECT p2.user_id
         FROM social_media_profile_interests i1
         JOIN social_media_profile_interests i2 ON i1.category_id = i2.category_id
         JOIN social_media_profile p1 ON i1.profile_id = p1.id
         JOIN social_media_profile p2 ON i2.profile_id = p2.id
-        WHERE p1.user_id = %s
-          AND p2.user_id != %s
+        WHERE p1.user_id = %s AND p2.user_id != %s
         GROUP BY p2.user_id
-        HAVING COUNT(*) >= %s
-        LIMIT %s
+        LIMIT 100
     """
-    rows = safe_fetch(cur, query, (user_id, user_id, min_shared, top_k))
+    rows = safe_fetch(cur, query, (user_id, user_id))
     return {r[0] for r in rows}
 
 def get_fallback(cur, exclude, limit=200):
@@ -202,7 +151,6 @@ def get_fallback(cur, exclude, limit=200):
             (*exclude, limit)
         )
     return {r[0] for r in rows}
-
 
 # ─────────────────────────────────────────────
 # USER ATTRIBUTES
@@ -227,15 +175,10 @@ def get_user_attributes(cur, user_ids):
             (uid,)
         )]
 
-        following = [r[0] for r in safe_fetch(cur,
-            "SELECT to_user_id FROM social_media_user_following WHERE from_user_id=%s",
-            (uid,)
-        )]
-
         profile = safe_fetchone(cur,
-            "SELECT bio, education, occupation FROM social_media_profile WHERE user_id=%s",
+            "SELECT bio FROM social_media_profile WHERE user_id=%s",
             (uid,)
-        ) or ("", "", "")
+        ) or ("",)
 
         result.append({
             "user_id": uid,
@@ -244,17 +187,13 @@ def get_user_attributes(cur, user_ids):
             "hobbies": hobbies or "",
             "address": address or "",
             "bio": profile[0] or "",
-            "education": profile[1] or "",
-            "occupation": profile[2] or "",
             "followers": followers,
-            "following": following,
         })
 
     return result
 
-
 # ─────────────────────────────────────────────
-# CORE ENGINE
+# CORE ENGINE (TF-IDF)
 # ─────────────────────────────────────────────
 def compute_suggestions(cur, user_id: str, top_n: int = 10):
 
@@ -262,15 +201,13 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
     blocked = get_blocked_users(cur, user_id)
     exclude = following | blocked | {user_id}
 
-    bfs = get_bfs_candidates(cur, user_id) - exclude
-    cluster = get_interest_cluster_candidates(cur, user_id) - exclude
-
-    pool = bfs | cluster
+    pool = (
+        get_bfs_candidates(cur, user_id) |
+        get_interest_cluster_candidates(cur, user_id)
+    ) - exclude
 
     if len(pool) < top_n:
-        pool |= get_fallback(cur, exclude, 200)
-
-    pool -= exclude
+        pool |= get_fallback(cur, exclude)
 
     data = get_user_attributes(cur, pool | {user_id})
     df = pd.DataFrame(data)
@@ -278,34 +215,23 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
     if df.empty or user_id not in df["user_id"].values:
         return [], "no_data"
 
-    target = df[df["user_id"] == user_id].iloc[0].to_dict()
+    texts = (df["bio"] + " " + df["hobbies"] + " " + df["address"]).tolist()
 
-    model = get_model()
+    vectorizer = TfidfVectorizer(max_features=500)
+    tfidf = vectorizer.fit_transform(texts)
 
-    texts = (
-        df["bio"].fillna("") + " " +
-        df["hobbies"].fillna("") + " " +
-        df["address"].fillna("")
-    ).tolist()
+    target_idx = df.index[df["user_id"] == user_id][0]
+    target_vec = tfidf[target_idx]
 
-    embeddings = model.encode(texts, show_progress_bar=False)
-    df["text_embed"] = list(embeddings)
-
-    target_text = " ".join([target.get("bio",""), target.get("hobbies",""), target.get("address","")])
-    target_embed = model.encode(target_text)
+    target_followers = set(df.iloc[target_idx]["followers"])
 
     results = []
 
-    target_followers = set(target.get("followers", []))
-
-    for _, row in df.iterrows():
-        cid = row["user_id"]
-        if cid == user_id:
+    for i, row in df.iterrows():
+        if row["user_id"] == user_id:
             continue
 
-        text_score = cosine_similarity(
-            [target_embed], [row["text_embed"]]
-        )[0][0]
+        text_score = cosine_similarity(target_vec, tfidf[i])[0][0]
 
         row_followers = set(row["followers"])
         shared = target_followers & row_followers
@@ -315,7 +241,7 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
         affinity = 0.6 * text_score + 0.4 * graph_score
 
         results.append({
-            "user_id": cid,
+            "user_id": row["user_id"],
             "username": row["username"],
             "full_name": row["full_name"],
             "affinity_score": float(affinity),
@@ -325,32 +251,23 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
             "breakdown": {
                 "text_score": float(text_score),
                 "graph_score": float(graph_score),
-                "adamic_adar": 0,
-                "second_degree": 0,
-                "interest_score": 0,
-                "location_score": 0,
-                "interaction_score": 0,
-                "collab_score": 0,
-                "activity_score": 0,
             },
             "weights_used": {
                 "text": 0.6,
                 "graph": 0.4,
-                "interest": 0,
-                "location": 0,
-                "interaction": 0,
-                "collab": 0,
-                "activity": 0,
             }
         })
 
     results.sort(key=lambda x: x["affinity_score"], reverse=True)
     return results[:top_n], "production"
 
+# ─────────────────────────────────────────────
+# ROUTES
+# ─────────────────────────────────────────────
+@app.get("/")
+def root():
+    return {"message": "API running"}
 
-# ─────────────────────────────────────────────
-# API ROUTES
-# ─────────────────────────────────────────────
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -379,42 +296,10 @@ def suggest(user_id: str, limit: int = Query(10, ge=1, le=50)):
         cur.close()
         conn.close()
 
-
-@app.get("/posts/suggest/{user_id}")
-def suggest_posts(user_id: str, limit: int = 20):
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    try:
-        cur.execute("""
-            SELECT p.id, p.content, p.user_id, p.created_at
-            FROM social_media_post p
-            WHERE p.user_id IN (
-                SELECT to_user_id
-                FROM social_media_user_following
-                WHERE from_user_id = %s
-            )
-            ORDER BY p.created_at DESC
-            LIMIT %s
-        """, (user_id, limit))
-
-        posts = cur.fetchall()
-
-        return {
-            "user_id": user_id,
-            "total": len(posts),
-            "posts": [
-                {
-                    "post_id": p[0],
-                    "content": p[1],
-                    "user_id": p[2],
-                    "created_at": str(p[3])
-                }
-                for p in posts
-            ]
-        }
-
-    finally:
-        cur.close()
-        conn.close()
+# ─────────────────────────────────────────────
+# PORT FIX (CRITICAL FOR RENDER)
+# ─────────────────────────────────────────────
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 5000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)

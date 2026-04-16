@@ -1,8 +1,10 @@
+import os
 import math
 import psycopg2
 import pandas as pd
 import numpy as np
 import networkx as nx
+import asyncio
 
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -15,9 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # ─────────────────────────────────────────────
-# GLOBAL MODEL (LOAD ONCE → FIXED)
+# GLOBAL MODEL (SAFE + FAST STARTUP)
 # ─────────────────────────────────────────────
-# MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 MODEL = None
 
 def get_model():
@@ -25,6 +26,7 @@ def get_model():
     if MODEL is None:
         MODEL = SentenceTransformer("all-MiniLM-L6-v2")
     return MODEL
+
 
 # ─────────────────────────────────────────────
 # APP SETUP
@@ -42,6 +44,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ─────────────────────────────────────────────
+# LOAD MODEL ON STARTUP (IMPORTANT FIX FOR RENDER)
+# ─────────────────────────────────────────────
+@app.on_event("startup")
+def startup_event():
+    global MODEL
+    MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+
+
 # ─────────────────────────────────────────────
 # DATABASE
 # ─────────────────────────────────────────────
@@ -57,6 +69,7 @@ def get_conn():
     conn = psycopg2.connect(**DB_CONFIG)
     conn.autocommit = True
     return conn
+
 
 # ─────────────────────────────────────────────
 # PYDANTIC MODELS
@@ -89,20 +102,9 @@ class SuggestedUser(BaseModel):
     mutual_count: int
     shared_tags: list
     reason: str
-    breakdown: ScoreBreakdown
-    weights_used: WeightsUsed
+    breakdown: dict
+    weights_used: dict
 
-class SuggestionResponse(BaseModel):
-    user_id: str
-    generated_at: str
-    mode: str
-    total: int
-    suggestions: list[SuggestedUser]
-
-class HealthResponse(BaseModel):
-    status: str
-    db: str
-    timestamp: str
 
 # ─────────────────────────────────────────────
 # SAFE DB HELPERS
@@ -122,6 +124,7 @@ def safe_fetchone(cur, query, params=()):
     except Exception:
         cur.connection.rollback()
         return None
+
 
 # ─────────────────────────────────────────────
 # FILTERS
@@ -148,8 +151,9 @@ def validate_user(cur, user_id: str) -> bool:
     )
     return row is not None
 
+
 # ─────────────────────────────────────────────
-# CANDIDATES (UNCHANGED LOGIC)
+# CANDIDATES
 # ─────────────────────────────────────────────
 def get_bfs_candidates(cur, user_id):
     query = """
@@ -171,7 +175,7 @@ def get_bfs_candidates(cur, user_id):
 
 def get_interest_cluster_candidates(cur, user_id, min_shared=1, top_k=100):
     query = """
-        SELECT p2.user_id, COUNT(*)
+        SELECT p2.user_id
         FROM social_media_profile_interests i1
         JOIN social_media_profile_interests i2 ON i1.category_id = i2.category_id
         JOIN social_media_profile p1 ON i1.profile_id = p1.id
@@ -199,8 +203,9 @@ def get_fallback(cur, exclude, limit=200):
         )
     return {r[0] for r in rows}
 
+
 # ─────────────────────────────────────────────
-# ATTRIBUTES (OPTIMIZED BUT SAME LOGIC)
+# USER ATTRIBUTES
 # ─────────────────────────────────────────────
 def get_user_attributes(cur, user_ids):
     if not user_ids:
@@ -232,12 +237,6 @@ def get_user_attributes(cur, user_ids):
             (uid,)
         ) or ("", "", "")
 
-        interests = [r[0] for r in safe_fetch(cur,
-            "SELECT category_id FROM social_media_profile_interests "
-            "WHERE profile_id=(SELECT id FROM social_media_profile WHERE user_id=%s)",
-            (uid,)
-        )]
-
         result.append({
             "user_id": uid,
             "username": username,
@@ -249,13 +248,13 @@ def get_user_attributes(cur, user_ids):
             "occupation": profile[2] or "",
             "followers": followers,
             "following": following,
-            "interests": interests,
         })
 
     return result
 
+
 # ─────────────────────────────────────────────
-# CORE ENGINE (UNCHANGED LOGIC)
+# CORE ENGINE
 # ─────────────────────────────────────────────
 def compute_suggestions(cur, user_id: str, top_n: int = 10):
 
@@ -283,7 +282,6 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
 
     model = get_model()
 
-    # ---------- FAST EMBEDDING (FIXED) ----------
     texts = (
         df["bio"].fillna("") + " " +
         df["hobbies"].fillna("") + " " +
@@ -291,20 +289,10 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
     ).tolist()
 
     embeddings = model.encode(texts, show_progress_bar=False)
-
     df["text_embed"] = list(embeddings)
 
-    target_text = " ".join(str(target.get(k, "")) for k in ["bio", "hobbies", "address"])
+    target_text = " ".join([target.get("bio",""), target.get("hobbies",""), target.get("address","")])
     target_embed = model.encode(target_text)
-
-    # ---------- GRAPH ----------
-    G = nx.DiGraph()
-
-    for _, row in df.iterrows():
-        for f in row["followers"]:
-            G.add_edge(f, row["user_id"])
-        for f in row["following"]:
-            G.add_edge(row["user_id"], f)
 
     results = []
 
@@ -320,8 +308,8 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
         )[0][0]
 
         row_followers = set(row["followers"])
-
         shared = target_followers & row_followers
+
         graph_score = len(shared) / (len(target_followers | row_followers) or 1)
 
         affinity = 0.6 * text_score + 0.4 * graph_score
@@ -359,8 +347,9 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
     results.sort(key=lambda x: x["affinity_score"], reverse=True)
     return results[:top_n], "production"
 
+
 # ─────────────────────────────────────────────
-# API
+# API ROUTES
 # ─────────────────────────────────────────────
 @app.get("/health")
 def health():
@@ -390,13 +379,14 @@ def suggest(user_id: str, limit: int = Query(10, ge=1, le=50)):
         cur.close()
         conn.close()
 
+
 @app.get("/posts/suggest/{user_id}")
 def suggest_posts(user_id: str, limit: int = 20):
+
     conn = get_conn()
     cur = conn.cursor()
 
     try:
-        # get posts from followed users
         cur.execute("""
             SELECT p.id, p.content, p.user_id, p.created_at
             FROM social_media_post p
@@ -427,4 +417,4 @@ def suggest_posts(user_id: str, limit: int = 20):
 
     finally:
         cur.close()
-        conn.close()        
+        conn.close()

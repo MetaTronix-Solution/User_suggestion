@@ -378,3 +378,42 @@ def suggest(user_id: str, limit: int = Query(10, ge=1, le=50)):
     finally:
         cur.close()
         conn.close()
+
+@app.get("/posts/suggest/{user_id}")
+def suggest_posts(user_id: str, limit: int = 20):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    try:
+        # get posts from followed users
+        cur.execute("""
+            SELECT p.id, p.content, p.user_id, p.created_at
+            FROM social_media_post p
+            WHERE p.user_id IN (
+                SELECT to_user_id
+                FROM social_media_user_following
+                WHERE from_user_id = %s
+            )
+            ORDER BY p.created_at DESC
+            LIMIT %s
+        """, (user_id, limit))
+
+        posts = cur.fetchall()
+
+        return {
+            "user_id": user_id,
+            "total": len(posts),
+            "posts": [
+                {
+                    "post_id": p[0],
+                    "content": p[1],
+                    "user_id": p[2],
+                    "created_at": str(p[3])
+                }
+                for p in posts
+            ]
+        }
+
+    finally:
+        cur.close()
+        conn.close()        

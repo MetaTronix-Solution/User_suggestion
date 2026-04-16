@@ -276,30 +276,39 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
     data = get_user_attributes(cur, pool | {user_id})
     df = pd.DataFrame(data)
 
+    if df.empty or user_id not in df["user_id"].values:
+        return [], "no_data"
+
     target = df[df["user_id"] == user_id].iloc[0].to_dict()
 
-    target_text = " ".join(
-    str(v) if not isinstance(v, list) else " ".join(map(str, v))
-    for v in target.values()
-    )
+    model = get_model()
 
-    df["text_embed"] = df.apply(
-        lambda r: get_model().encode(str(r["bio"] + r["hobbies"] + r["address"])),
-        axis=1
-    )
+    # ---------- FAST EMBEDDING (FIXED) ----------
+    texts = (
+        df["bio"].fillna("") + " " +
+        df["hobbies"].fillna("") + " " +
+        df["address"].fillna("")
+    ).tolist()
 
-    target_embed = get_model().encode(target_text)
+    embeddings = model.encode(texts, show_progress_bar=False)
 
+    df["text_embed"] = list(embeddings)
+
+    target_text = " ".join(str(target.get(k, "")) for k in ["bio", "hobbies", "address"])
+    target_embed = model.encode(target_text)
+
+    # ---------- GRAPH ----------
     G = nx.DiGraph()
 
     for _, row in df.iterrows():
         for f in row["followers"]:
             G.add_edge(f, row["user_id"])
-
         for f in row["following"]:
             G.add_edge(row["user_id"], f)
 
     results = []
+
+    target_followers = set(target.get("followers", []))
 
     for _, row in df.iterrows():
         cid = row["user_id"]
@@ -310,8 +319,10 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
             [target_embed], [row["text_embed"]]
         )[0][0]
 
-        shared = len(set(target["followers"]) & set(row["followers"]))
-        graph_score = shared / (len(set(target["followers"]) | set(row["followers"])) or 1)
+        row_followers = set(row["followers"])
+
+        shared = target_followers & row_followers
+        graph_score = len(shared) / (len(target_followers | row_followers) or 1)
 
         affinity = 0.6 * text_score + 0.4 * graph_score
 
@@ -320,7 +331,7 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
             "username": row["username"],
             "full_name": row["full_name"],
             "affinity_score": float(affinity),
-            "mutual_count": shared,
+            "mutual_count": len(shared),
             "shared_tags": [],
             "reason": "Suggested",
             "breakdown": {

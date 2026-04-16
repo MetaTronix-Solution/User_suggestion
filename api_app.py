@@ -278,7 +278,10 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
 
     target = df[df["user_id"] == user_id].iloc[0].to_dict()
 
-    target_text = " ".join(target.values())
+    target_text = " ".join(
+    str(v) if not isinstance(v, list) else " ".join(map(str, v))
+    for v in target.values()
+    )
 
     df["text_embed"] = df.apply(
         lambda r: get_model().encode(str(r["bio"] + r["hobbies"] + r["address"])),

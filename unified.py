@@ -6,11 +6,13 @@ Merged API combining:
   - Post/Reel Recommendations  →  GET /recommend/{user_id}
   - Health check  →  GET /health
 
-Performance fixes applied:
-  1. SentenceTransformer loaded ONCE at startup via lifespan (was reloading every request ~3-5s)
-  2. User attributes fetched in ONE batched SQL query (was N+1 queries per user)
-  3. Followers/following/interests fetched in 3 bulk queries (was 3 queries × N users)
-  4. Persistent DB connection replaced with per-request connections (prevents stale cursor bugs)
+Fixes applied:
+  1. SentenceTransformer loads ONCE at startup with backend="torch" only
+     → skips ONNX/OpenVINO/quantized variants (~700MB saved, fits in 512MB RAM)
+  2. Model cached to ./models/ so Render never re-downloads on restart
+  3. CPU-only torch forced → no CUDA overhead
+  4. TOKENIZERS_PARALLELISM=false → no fork warnings
+  5. psutil added for RAM logging
 """
 
 import os
@@ -56,21 +58,44 @@ W_RANDOM   = float(os.getenv("W_RANDOM",   0.2))
 
 
 # ─────────────────────────────────────────────
-# FIX 1 — Load model ONCE at startup, not per request
-# Before: SentenceTransformer() was called inside compute_user_suggestions()
-#         = 3-5 second penalty on every single request
-# After:  loaded once when the server boots, reused forever
+# MODEL LOADING — RAM-safe for 512MB instances
+#
+# FIX: added cache_folder + backend="torch"
+# Before: downloaded ALL variants (ONNX × 4, OpenVINO, quantized × 4)
+#         = ~725MB → OOM crash on Render free tier
+# After:  downloads only PyTorch weights = ~91MB, fits in 512MB easily
 # ─────────────────────────────────────────────
+MODEL_CACHE_DIR = os.path.join(os.path.dirname(__file__), "models")
+MODEL_NAME      = "sentence-transformers/all-MiniLM-L6-v2"
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 _MODEL: Optional[SentenceTransformer] = None
+
+
+def _get_ram_mb() -> float:
+    try:
+        import psutil
+        return psutil.Process().memory_info().rss / 1024 / 1024
+    except Exception:
+        return 0.0
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _MODEL
     print("[startup] Loading SentenceTransformer model...")
-    _MODEL = SentenceTransformer("all-MiniLM-L6-v2")
-    print("[startup] Model ready.")
+    os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
+    _MODEL = SentenceTransformer(
+        MODEL_NAME,
+        cache_folder=MODEL_CACHE_DIR,
+        backend="torch",   # ← KEY FIX: skips ONNX/OpenVINO downloads (~700MB saved)
+    )
+    _MODEL = _MODEL.to("cpu")  # force CPU — no CUDA overhead
+    print(f"[startup] Model ready. RAM: ~{_get_ram_mb():.0f}MB")
     yield
     print("[shutdown] Cleaning up.")
+
 
 def get_model() -> SentenceTransformer:
     if _MODEL is None:
@@ -180,12 +205,6 @@ def get_all_user_ids_fallback(cur, user_id: str, following: Set, blocked: Set, l
         return set()
 
 
-# ─────────────────────────────────────────────
-# FIX 2 — Batch all user attribute queries
-# Before: 3 separate queries per user inside a loop = N×3 round-trips
-#         For 200 candidates → 600 DB queries
-# After:  3 bulk queries total for all users combined → 3 DB queries
-# ─────────────────────────────────────────────
 def get_user_attributes_bulk(cur, user_ids: Set[str]) -> list:
     """
     Fetch all user attributes in 4 bulk queries regardless of pool size.
@@ -216,7 +235,6 @@ def get_user_attributes_bulk(cur, user_ids: Set[str]) -> list:
         cur.connection.rollback()
         return []
 
-    # Build lookup maps
     user_map    = {}
     profile_ids = []
     for row in base_rows:
@@ -286,9 +304,6 @@ def location_similarity(a1: str, a2: str) -> float:
     return 0.6 if overlap and len(overlap) >= 2 else 0.0
 
 
-# ─────────────────────────────────────────────
-# MAIN SUGGESTION ENGINE
-# ─────────────────────────────────────────────
 def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
     conn = get_db_connection()
     cur  = conn.cursor()
@@ -306,7 +321,6 @@ def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
             pool |= get_all_user_ids_fallback(cur, user_id, following, blocked, 200)
         pool -= exclude
 
-        # FIX 2: one bulk call instead of N×3 queries
         data = get_user_attributes_bulk(cur, pool | {user_id})
 
     finally:
@@ -322,7 +336,6 @@ def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
         return []
     target = target_row.iloc[0].to_dict()
 
-    # FIX 1: reuse pre-loaded model
     model = get_model()
 
     def safe_text(r):
@@ -719,7 +732,7 @@ app = FastAPI(
     title="Unified Social Media API",
     version="1.0.0",
     description="User suggestions + Post/Reel recommendations in one service",
-    lifespan=lifespan,   # ← model loads here at startup
+    lifespan=lifespan,
 )
 
 app.add_middleware(

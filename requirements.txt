@@ -10,3 +10,7 @@ python-dotenv==1.0.0
 pydantic==2.5.0
 huggingface_hub==0.13.3
 gunicorn
+torch --index-url https://download.pytorch.org/whl/cpu
+psutil
+
+ 

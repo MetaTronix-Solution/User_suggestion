@@ -59,11 +59,6 @@ W_RANDOM   = float(os.getenv("W_RANDOM",   0.2))
 
 # ─────────────────────────────────────────────
 # MODEL LOADING — RAM-safe for 512MB instances
-#
-# FIX: added cache_folder + backend="torch"
-# Before: downloaded ALL variants (ONNX × 4, OpenVINO, quantized × 4)
-#         = ~725MB → OOM crash on Render free tier
-# After:  downloads only PyTorch weights = ~91MB, fits in 512MB easily
 # ─────────────────────────────────────────────
 MODEL_CACHE_DIR = os.path.join(os.path.dirname(__file__), "models")
 MODEL_NAME      = "sentence-transformers/all-MiniLM-L6-v2"
@@ -86,11 +81,13 @@ async def lifespan(app: FastAPI):
     global _MODEL
     print("[startup] Loading SentenceTransformer model...")
     os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
+
     _MODEL = SentenceTransformer(
         MODEL_NAME,
         cache_folder=MODEL_CACHE_DIR,
-        backend="torch",   # ← KEY FIX: skips ONNX/OpenVINO downloads (~700MB saved)
+        backend="torch"   # ✅ FIX KEPT (important)
     )
+
     _MODEL = _MODEL.to("cpu")  # force CPU — no CUDA overhead
     print(f"[startup] Model ready. RAM: ~{_get_ram_mb():.0f}MB")
     yield
@@ -104,7 +101,7 @@ def get_model() -> SentenceTransformer:
 
 
 # ─────────────────────────────────────────────
-# DB HELPERS  (per-request connections, no global cursor)
+# DB HELPERS
 # ─────────────────────────────────────────────
 def get_db_connection():
     return psycopg2.connect(**DB_CONFIG)
@@ -124,7 +121,7 @@ def full_url(path: Optional[str]) -> Optional[str]:
 
 
 # ═══════════════════════════════════════════════════════════
-#  SECTION 1 — USER SUGGESTION ENGINE
+# USER SUGGESTION ENGINE
 # ═══════════════════════════════════════════════════════════
 
 def get_already_following(cur, user_id: str) -> Set[str]:

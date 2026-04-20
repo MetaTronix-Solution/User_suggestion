@@ -8,12 +8,11 @@ Merged API combining:
 
 RAM Optimizations Applied:
   1. Switched to paraphrase-MiniLM-L3-v2 (~120MB RAM vs ~380MB for L6)
-  2. ONNX quantization via optimum (optional, ~100MB if installed)
-  3. Batch encoding replaces per-item loop → lower peak RAM
-  4. In-process LRU embed cache → no re-encoding same text
-  5. Embeddings explicitly deleted after scoring
-  6. CPU-only torch, TOKENIZERS_PARALLELISM=false
-  7. Model cached to ./models/ so Render never re-downloads on restart
+  2. Batch encoding replaces per-item loop → lower peak RAM
+  3. In-process LRU embed cache → no re-encoding same text
+  4. Embeddings explicitly deleted after scoring
+  5. CPU-only torch, TOKENIZERS_PARALLELISM=false
+  6. Model cached to ./models/ so Render never re-downloads on restart
 """
 
 import os
@@ -30,7 +29,6 @@ import psycopg2.extras
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from functools import lru_cache
 from typing import Any, Dict, List, Optional, Set
 
 from dotenv import load_dotenv
@@ -65,33 +63,17 @@ W_RANDOM   = float(os.getenv("W_RANDOM",   0.2))
 # ─────────────────────────────────────────────
 MODEL_CACHE_DIR = os.path.join(os.path.dirname(__file__), "models")
 
-# ✅ FIX 1: L3 uses ~120MB RAM vs L6's ~380MB — biggest single saving
+# L3 uses ~120MB RAM vs L6's ~380MB — biggest single saving
 MODEL_NAME = os.getenv("EMBED_MODEL", "sentence-transformers/paraphrase-MiniLM-L3-v2")
-
-# ✅ FIX 2: Use ONNX quantized backend if optimum is installed, else plain torch
-#    ONNX int8 quantization can drop model RAM to ~60–80MB
-def _pick_backend() -> dict:
-    try:
-        import optimum  # noqa: F401
-        print("[startup] optimum found → using ONNX quantized backend (~80MB)")
-        return {
-            "backend": "onnx",
-            "model_kwargs": {"file_name": "onnx/model_quantized.onnx"},
-        }
-    except ImportError:
-        print("[startup] optimum not found → falling back to torch backend")
-        return {"backend": "torch"}
-
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 _MODEL: Optional[SentenceTransformer] = None
-EMBED_DIM = 384  # L6 dim; L3 also outputs 384
+EMBED_DIM = 384
 
-# ✅ FIX 3: In-process LRU embedding cache — avoids re-encoding identical texts
-#    across requests (bio/hobbies rarely change per user)
+# In-process embedding cache — avoids re-encoding identical texts across requests
 _EMBED_CACHE: Dict[str, np.ndarray] = {}
-_EMBED_CACHE_MAX = 2000  # cap to avoid unbounded growth
+_EMBED_CACHE_MAX = 2000
 
 
 def _cache_embed(text: str, model: SentenceTransformer) -> np.ndarray:
@@ -101,7 +83,6 @@ def _cache_embed(text: str, model: SentenceTransformer) -> np.ndarray:
     key = hashlib.md5(text.encode()).hexdigest()
     if key not in _EMBED_CACHE:
         if len(_EMBED_CACHE) >= _EMBED_CACHE_MAX:
-            # Evict ~10% oldest entries (simple FIFO via dict insertion order)
             evict = list(_EMBED_CACHE.keys())[: _EMBED_CACHE_MAX // 10]
             for k in evict:
                 del _EMBED_CACHE[k]
@@ -123,15 +104,13 @@ async def lifespan(app: FastAPI):
     print(f"[startup] Loading SentenceTransformer: {MODEL_NAME}")
     os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
 
-    backend_kwargs = _pick_backend()
+    # No 'backend' kwarg — not supported in older sentence-transformers versions
     _MODEL = SentenceTransformer(
         MODEL_NAME,
         cache_folder=MODEL_CACHE_DIR,
-        **backend_kwargs,
     )
-    _MODEL = _MODEL.to("cpu")  # force CPU — no CUDA overhead
+    _MODEL = _MODEL.to("cpu")
 
-    # Warm-up encode to JIT-compile / pre-allocate buffers
     _MODEL.encode("warmup", show_progress_bar=False)
     gc.collect()
 
@@ -250,16 +229,12 @@ def get_all_user_ids_fallback(cur, user_id: str, following: Set, blocked: Set, l
 
 
 def get_user_attributes_bulk(cur, user_ids: Set[str]) -> list:
-    """
-    Fetch all user attributes in 4 bulk queries regardless of pool size.
-    """
     if not user_ids:
         return []
 
     uid_list     = list(user_ids)
     placeholders = ",".join(["%s"] * len(uid_list))
 
-    # Query 1: base user + profile (single JOIN)
     try:
         cur.execute(f"""
             SELECT
@@ -290,7 +265,6 @@ def get_user_attributes_bulk(cur, user_ids: Set[str]) -> list:
         if row[8]:
             profile_ids.append(row[8])
 
-    # Query 2: all followers in one shot
     try:
         cur.execute(f"""
             SELECT to_user_id, from_user_id
@@ -303,7 +277,6 @@ def get_user_attributes_bulk(cur, user_ids: Set[str]) -> list:
     except Exception:
         cur.connection.rollback()
 
-    # Query 3: all following in one shot
     try:
         cur.execute(f"""
             SELECT from_user_id, to_user_id
@@ -316,7 +289,6 @@ def get_user_attributes_bulk(cur, user_ids: Set[str]) -> list:
     except Exception:
         cur.connection.rollback()
 
-    # Query 4: all interests in one shot
     if profile_ids:
         try:
             prof_placeholders = ",".join(["%s"] * len(profile_ids))
@@ -383,25 +355,20 @@ def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
     def safe_text(r):
         return " ".join([str(r.get("bio", "")), str(r.get("hobbies", "")), str(r.get("address", ""))])
 
-    # ✅ FIX 4: Batch encode ALL texts in a single forward pass
-    #    This is dramatically faster and uses less peak RAM than a loop
     df["text"] = df.apply(safe_text, axis=1)
     all_texts  = df["text"].tolist()
 
-    # Use cache for texts we've seen before, batch-encode the rest
-    uncached_texts  = [t for t in all_texts if t.strip() and hashlib.md5(t.encode()).hexdigest() not in _EMBED_CACHE]
+    # Batch encode only uncached texts in one forward pass
+    uncached_texts = [t for t in all_texts if t.strip() and hashlib.md5(t.encode()).hexdigest() not in _EMBED_CACHE]
     if uncached_texts:
-        # ✅ Encode uncached in one batched call (batch_size=32 balances RAM vs speed)
         new_embeds = model.encode(uncached_texts, batch_size=32, show_progress_bar=False)
         for t, emb in zip(uncached_texts, new_embeds):
             key = hashlib.md5(t.encode()).hexdigest()
             if len(_EMBED_CACHE) < _EMBED_CACHE_MAX:
                 _EMBED_CACHE[key] = emb
 
-    # Now fetch all from cache (or zeros for empty texts)
-    embeddings = np.array([_cache_embed(t, model) for t in all_texts])
-    df["embed"] = list(embeddings)
-
+    embeddings   = np.array([_cache_embed(t, model) for t in all_texts])
+    df["embed"]  = list(embeddings)
     target_embed = _cache_embed(safe_text(target), model)
 
     G = nx.DiGraph()
@@ -413,18 +380,18 @@ def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
 
     candidate_df = df[df["user_id"] != user_id].copy()
 
-    # ✅ FIX 5: Batch cosine similarity in one call instead of per-row
     if len(candidate_df) > 0:
-        cand_embeds  = np.vstack(candidate_df["embed"].tolist())
-        text_scores  = cosine_similarity([target_embed], cand_embeds)[0]
+        cand_embeds = np.vstack(candidate_df["embed"].tolist())
+        text_scores = cosine_similarity([target_embed], cand_embeds)[0]
     else:
+        cand_embeds = np.array([])
         text_scores = np.array([])
 
     results = []
     for idx, (_, r) in enumerate(candidate_df.iterrows()):
         text_score  = float(text_scores[idx]) if idx < len(text_scores) else 0.0
-        gf_t        = set(G.successors(user_id))       if G.has_node(user_id)       else set()
-        gf_c        = set(G.successors(r["user_id"]))  if G.has_node(r["user_id"])  else set()
+        gf_t        = set(G.successors(user_id))      if G.has_node(user_id)      else set()
+        gf_c        = set(G.successors(r["user_id"])) if G.has_node(r["user_id"]) else set()
         shared      = gf_t & gf_c
         graph_score = len(shared) / (len(gf_t | gf_c) or 1)
         ti          = set(target["interests"])
@@ -457,10 +424,11 @@ def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
             "weights_used": {"text": 0.5, "graph": 0.2, "interest": 0.2, "location": 0.1},
         })
 
-    # ✅ FIX 6: Explicitly free large embedding arrays after scoring
+    # Explicitly free large arrays after scoring
     del df["embed"]
     del embeddings
-    del cand_embeds
+    if cand_embeds.size:
+        del cand_embeds
     gc.collect()
 
     results.sort(key=lambda x: x["affinity_score"], reverse=True)
@@ -850,13 +818,6 @@ def suggest(
     user_id: str,
     limit: int = Query(10, ge=1, le=50, description="Number of user suggestions to return"),
 ):
-    """
-    Returns ranked user suggestions for *user_id* based on:
-    - BFS friend-of-friend graph walk (depth 2)
-    - Shared interest clusters
-    - Bio / hobbies / location text similarity (sentence embeddings)
-    - Location overlap
-    """
     suggestions = compute_user_suggestions(user_id, limit)
     return {
         "user_id":      user_id,
@@ -872,12 +833,6 @@ def recommend(
     user_id: str,
     top_n: int = Query(20, ge=1, le=200, description="Max posts / reels to return"),
 ):
-    """
-    Returns ranked post/reel recommendations for *user_id* based on:
-    - Posts from followed users (content signal)
-    - Recency decay (trending signal)
-    - Random noise (diversity)
-    """
     try:
         validate_user_in_db(user_id)
     except ValueError as e:

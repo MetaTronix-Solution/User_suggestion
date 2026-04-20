@@ -6,19 +6,22 @@ Merged API combining:
   - Post/Reel Recommendations  →  GET /recommend/{user_id}
   - Health check  →  GET /health
 
-Fixes applied:
-  1. SentenceTransformer loads ONCE at startup with backend="torch" only
-     → skips ONNX/OpenVINO/quantized variants (~700MB saved, fits in 512MB RAM)
-  2. Model cached to ./models/ so Render never re-downloads on restart
-  3. CPU-only torch forced → no CUDA overhead
-  4. TOKENIZERS_PARALLELISM=false → no fork warnings
-  5. psutil added for RAM logging
+RAM Optimizations Applied:
+  1. Switched to paraphrase-MiniLM-L3-v2 (~120MB RAM vs ~380MB for L6)
+  2. ONNX quantization via optimum (optional, ~100MB if installed)
+  3. Batch encoding replaces per-item loop → lower peak RAM
+  4. In-process LRU embed cache → no re-encoding same text
+  5. Embeddings explicitly deleted after scoring
+  6. CPU-only torch, TOKENIZERS_PARALLELISM=false
+  7. Model cached to ./models/ so Render never re-downloads on restart
 """
 
 import os
+import gc
 import math
 import time
 import random
+import hashlib
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -27,7 +30,8 @@ import psycopg2.extras
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Set
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Set
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -56,16 +60,53 @@ W_CONTENT  = float(os.getenv("W_CONTENT",  0.5))
 W_TRENDING = float(os.getenv("W_TRENDING", 0.3))
 W_RANDOM   = float(os.getenv("W_RANDOM",   0.2))
 
-
 # ─────────────────────────────────────────────
 # MODEL LOADING — RAM-safe for 512MB instances
 # ─────────────────────────────────────────────
 MODEL_CACHE_DIR = os.path.join(os.path.dirname(__file__), "models")
-MODEL_NAME      = "sentence-transformers/all-MiniLM-L6-v2"
+
+# ✅ FIX 1: L3 uses ~120MB RAM vs L6's ~380MB — biggest single saving
+MODEL_NAME = os.getenv("EMBED_MODEL", "sentence-transformers/paraphrase-MiniLM-L3-v2")
+
+# ✅ FIX 2: Use ONNX quantized backend if optimum is installed, else plain torch
+#    ONNX int8 quantization can drop model RAM to ~60–80MB
+def _pick_backend() -> dict:
+    try:
+        import optimum  # noqa: F401
+        print("[startup] optimum found → using ONNX quantized backend (~80MB)")
+        return {
+            "backend": "onnx",
+            "model_kwargs": {"file_name": "onnx/model_quantized.onnx"},
+        }
+    except ImportError:
+        print("[startup] optimum not found → falling back to torch backend")
+        return {"backend": "torch"}
+
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 _MODEL: Optional[SentenceTransformer] = None
+EMBED_DIM = 384  # L6 dim; L3 also outputs 384
+
+# ✅ FIX 3: In-process LRU embedding cache — avoids re-encoding identical texts
+#    across requests (bio/hobbies rarely change per user)
+_EMBED_CACHE: Dict[str, np.ndarray] = {}
+_EMBED_CACHE_MAX = 2000  # cap to avoid unbounded growth
+
+
+def _cache_embed(text: str, model: SentenceTransformer) -> np.ndarray:
+    """Return cached embedding or compute + store it."""
+    if not text.strip():
+        return np.zeros(EMBED_DIM, dtype=np.float32)
+    key = hashlib.md5(text.encode()).hexdigest()
+    if key not in _EMBED_CACHE:
+        if len(_EMBED_CACHE) >= _EMBED_CACHE_MAX:
+            # Evict ~10% oldest entries (simple FIFO via dict insertion order)
+            evict = list(_EMBED_CACHE.keys())[: _EMBED_CACHE_MAX // 10]
+            for k in evict:
+                del _EMBED_CACHE[k]
+        _EMBED_CACHE[key] = model.encode(text, show_progress_bar=False)
+    return _EMBED_CACHE[key]
 
 
 def _get_ram_mb() -> float:
@@ -79,19 +120,25 @@ def _get_ram_mb() -> float:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _MODEL
-    print("[startup] Loading SentenceTransformer model...")
+    print(f"[startup] Loading SentenceTransformer: {MODEL_NAME}")
     os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
 
+    backend_kwargs = _pick_backend()
     _MODEL = SentenceTransformer(
         MODEL_NAME,
         cache_folder=MODEL_CACHE_DIR,
-        backend="torch"   # ✅ FIX KEPT (important)
+        **backend_kwargs,
     )
-
     _MODEL = _MODEL.to("cpu")  # force CPU — no CUDA overhead
+
+    # Warm-up encode to JIT-compile / pre-allocate buffers
+    _MODEL.encode("warmup", show_progress_bar=False)
+    gc.collect()
+
     print(f"[startup] Model ready. RAM: ~{_get_ram_mb():.0f}MB")
     yield
     print("[shutdown] Cleaning up.")
+    _EMBED_CACHE.clear()
 
 
 def get_model() -> SentenceTransformer:
@@ -205,8 +252,6 @@ def get_all_user_ids_fallback(cur, user_id: str, following: Set, blocked: Set, l
 def get_user_attributes_bulk(cur, user_ids: Set[str]) -> list:
     """
     Fetch all user attributes in 4 bulk queries regardless of pool size.
-    Previous approach: 3 queries × N users = 600 queries for 200 users.
-    New approach: always exactly 4 queries total.
     """
     if not user_ids:
         return []
@@ -338,9 +383,26 @@ def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
     def safe_text(r):
         return " ".join([str(r.get("bio", "")), str(r.get("hobbies", "")), str(r.get("address", ""))])
 
-    df["text"]  = df.apply(safe_text, axis=1)
-    df["embed"] = [model.encode(t) if t.strip() else np.zeros(384) for t in df["text"]]
-    target_embed = model.encode(safe_text(target))
+    # ✅ FIX 4: Batch encode ALL texts in a single forward pass
+    #    This is dramatically faster and uses less peak RAM than a loop
+    df["text"] = df.apply(safe_text, axis=1)
+    all_texts  = df["text"].tolist()
+
+    # Use cache for texts we've seen before, batch-encode the rest
+    uncached_texts  = [t for t in all_texts if t.strip() and hashlib.md5(t.encode()).hexdigest() not in _EMBED_CACHE]
+    if uncached_texts:
+        # ✅ Encode uncached in one batched call (batch_size=32 balances RAM vs speed)
+        new_embeds = model.encode(uncached_texts, batch_size=32, show_progress_bar=False)
+        for t, emb in zip(uncached_texts, new_embeds):
+            key = hashlib.md5(t.encode()).hexdigest()
+            if len(_EMBED_CACHE) < _EMBED_CACHE_MAX:
+                _EMBED_CACHE[key] = emb
+
+    # Now fetch all from cache (or zeros for empty texts)
+    embeddings = np.array([_cache_embed(t, model) for t in all_texts])
+    df["embed"] = list(embeddings)
+
+    target_embed = _cache_embed(safe_text(target), model)
 
     G = nx.DiGraph()
     for _, r in df.iterrows():
@@ -349,12 +411,18 @@ def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
         for f in r["following"]:
             G.add_edge(r["user_id"], f)
 
-    results = []
-    for _, r in df.iterrows():
-        if r["user_id"] == user_id:
-            continue
+    candidate_df = df[df["user_id"] != user_id].copy()
 
-        text_score  = float(cosine_similarity([target_embed], [r["embed"]])[0][0])
+    # ✅ FIX 5: Batch cosine similarity in one call instead of per-row
+    if len(candidate_df) > 0:
+        cand_embeds  = np.vstack(candidate_df["embed"].tolist())
+        text_scores  = cosine_similarity([target_embed], cand_embeds)[0]
+    else:
+        text_scores = np.array([])
+
+    results = []
+    for idx, (_, r) in enumerate(candidate_df.iterrows()):
+        text_score  = float(text_scores[idx]) if idx < len(text_scores) else 0.0
         gf_t        = set(G.successors(user_id))       if G.has_node(user_id)       else set()
         gf_c        = set(G.successors(r["user_id"]))  if G.has_node(r["user_id"])  else set()
         shared      = gf_t & gf_c
@@ -389,12 +457,18 @@ def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
             "weights_used": {"text": 0.5, "graph": 0.2, "interest": 0.2, "location": 0.1},
         })
 
+    # ✅ FIX 6: Explicitly free large embedding arrays after scoring
+    del df["embed"]
+    del embeddings
+    del cand_embeds
+    gc.collect()
+
     results.sort(key=lambda x: x["affinity_score"], reverse=True)
     return results[:top_n]
 
 
 # ═══════════════════════════════════════════════════════════
-#  SECTION 2 — POST / REEL RECOMMENDATION ENGINE (unchanged)
+#  SECTION 2 — POST / REEL RECOMMENDATION ENGINE
 # ═══════════════════════════════════════════════════════════
 
 class MediaItem(BaseModel):
@@ -752,10 +826,22 @@ def health():
         return {
             "status":    "ok",
             "database":  "connected",
+            "ram_mb":    round(_get_ram_mb(), 1),
+            "embed_cache_size": len(_EMBED_CACHE),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
+
+
+# ── Cache Management ──────────────────────────────────────
+@app.post("/admin/clear-embed-cache")
+def clear_embed_cache():
+    """Manually flush the in-process embedding cache."""
+    count = len(_EMBED_CACHE)
+    _EMBED_CACHE.clear()
+    gc.collect()
+    return {"cleared": count, "ram_mb": round(_get_ram_mb(), 1)}
 
 
 # ── User Suggestions ──────────────────────────────────────

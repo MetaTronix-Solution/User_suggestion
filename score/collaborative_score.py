@@ -69,7 +69,6 @@ def user_based_recommendations(user_id, matrix, similarity_user):
     Only predicts for posts the target user has NOT interacted with.
     """
     if user_id not in similarity_user.index:
-        print(f"User '{user_id}' not found.")
         return []
 
     # Top N most similar users (exclude self)
@@ -109,7 +108,6 @@ def item_based_recommendations(user_id, matrix, similarity_item):
     Only predicts for posts the target user has NOT interacted with.
     """
     if user_id not in matrix.index:
-        print(f"User '{user_id}' not found.")
         return []
 
     # Posts the target user HAS interacted with
@@ -186,6 +184,21 @@ def collaborative_filter_response(user_input):
 
     # Step 1: Reaction Matrix
     matrix = build_reaction_matrix(rows)
+
+    # ✅ COLD-START: user has no reactions → return popular posts instead
+    if user_input not in matrix.index:
+        print(f"  ⚠️  Cold-start: no reactions for user, using popularity fallback")
+        popular = (
+            matrix
+            .apply(lambda col: col[col > 0].sum())   # sum of positive scores per post
+            .sort_values(ascending=False)
+            .head(20)
+        )
+        return [
+            {"post_id": post_id, "similarity": round(float(score), 2)}
+            for post_id, score in popular.items()
+            if score > 0
+        ]
    
     # print("USER-POST REACTION SCORE MATRIX")
     

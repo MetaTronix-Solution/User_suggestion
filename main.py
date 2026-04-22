@@ -8,6 +8,11 @@ Run CLI:
   python main.py <user_id>
 """
 
+import warnings
+import pandas as pd
+warnings.filterwarnings("ignore", category=FutureWarning)
+pd.set_option('future.no_silent_downcasting', True)
+
 import gc
 import os
 import subprocess
@@ -167,6 +172,12 @@ if __name__ == "__main__":
     print("\n🔄 Running pipeline to build indexes and scores...")
     run_pipeline()
 
+    # ✅ Pre-warm embedding model once for both scorers
+    print("🔥 Warming up embedding model...")
+    from embeddings.model import get_model
+    get_model()
+    print("   Model ready.\n")
+
     # ── POST RECOMMENDATIONS ──────────────────────────────────────
     try:
         response = compute_post_recommendations(uid, top_n=TOP_N)
@@ -189,6 +200,11 @@ if __name__ == "__main__":
     try:
         print("\n🔍 Computing user recommendations...")
 
+        # ✅ Pre-warm model once before user suggestions
+        # (post scoring already loaded it; this ensures it's cached)
+        from embeddings.model import get_model as _warm
+        _warm()
+
         user_suggestions = compute_user_suggestions(uid)
 
         if not user_suggestions:
@@ -201,7 +217,7 @@ if __name__ == "__main__":
 
                 if isinstance(u, dict):
                     user_id = u.get("user_id", "N/A")
-                    score = u.get("score", 0.0)
+                    score = u.get("affinity_score", 0.0)
                 else:
                     user_id, score = u
 

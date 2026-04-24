@@ -49,7 +49,7 @@
 #     "user": os.getenv("DB_USER"),
 #     "password": os.getenv("DB_PASSWORD")
 # }
-# MEDIA_BASE_URL = "http://182.93.94.220:8005"   # prepended to avatar paths
+# MEDIA_BASE_URL = "http://36.253.137.34:8005"   # prepended to avatar paths
 
 
 # def get_db_connection():

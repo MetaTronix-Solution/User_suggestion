@@ -71,7 +71,7 @@ def cache_embed(text: str, model):
 # ─────────────────────────────────────────────
 
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "182.93.94.220"),
+    "host": os.getenv("DB_HOST", "36.253.137.34"),
     "port": int(os.getenv("DB_PORT", 5436)),
     "dbname": os.getenv("DB_NAME", "social_db"),
     "user": os.getenv("DB_USER", "innovator_user"),

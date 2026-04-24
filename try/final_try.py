@@ -37,7 +37,7 @@ from pydantic import BaseModel
 # DB CONFIG
 # ──────────────────────────────────────────────
 DB_CONFIG = dict(
-    host="182.93.94.220",
+    host="36.253.137.34",
     port=5436,
     dbname="social_db",
     user="innovator_user",
@@ -69,7 +69,7 @@ WEIGHTS = {
 TOP_N      = 20
 OUTPUT_CSV = False   # disabled by default for API; CLI still saves
 
-MEDIA_BASE_URL = "http://182.93.94.220:8005"
+MEDIA_BASE_URL = "http://36.253.137.34:8005"
 
 
 # ──────────────────────────────────────────────

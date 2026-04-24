@@ -23,7 +23,7 @@ DB_CONFIG = {
     "password": _get_env("DB_PASSWORD", required=True),
 }
 
-MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "http://182.93.94.220:8005").rstrip("/")
+MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "http://36.253.137.34:8005").rstrip("/")
 TRENDING_CSV = "data/post_trending_scores.csv"
 
 # Four-signal recommendation weights

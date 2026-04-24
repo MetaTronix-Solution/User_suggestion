@@ -3,7 +3,7 @@ import psycopg2.extras
 import pandas as pd
 
 db_config = {
-    "host": "182.93.94.220",
+    "host": "36.253.137.34",
     "port": 5436,
     "dbname": "social_db",
     "user": "innovator_user",

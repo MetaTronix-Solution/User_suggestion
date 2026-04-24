@@ -32,8 +32,15 @@ app.add_middleware(
 # ─────────────────────────────────────────────
 # DATABASE
 # ─────────────────────────────────────────────
+def _clean_host(host: str) -> str:
+    """Strip http:// or https:// prefix from host — psycopg2 needs a bare IP."""
+    for prefix in ("https://", "http://"):
+        if host.startswith(prefix):
+            host = host[len(prefix):]
+    return host.rstrip("/")
+
 DB_CONFIG = dict(
-    host=os.getenv("DB_HOST", "36.253.137.34"),
+    host=_clean_host(os.getenv("DB_HOST", "36.253.137.34")),
     port=int(os.getenv("DB_PORT", 5436)),
     dbname=os.getenv("DB_NAME", "social_db"),
     user=os.getenv("DB_USER", "innovator_user"),

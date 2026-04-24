@@ -272,6 +272,17 @@ def root():
 def health():
     return {"status": "ok"}
 
+@app.get("/check-config")
+def check_config():
+    return {
+        "db_config": {
+            **DB_CONFIG,
+            "password": "***" # Hide password
+        },
+        "env_db_host": os.getenv("DB_HOST"),
+        "env_db_port": os.getenv("DB_PORT")
+    }
+
 @app.get("/suggest/{user_id}")
 def suggest(user_id: str, limit: int = Query(10, ge=1, le=50)):
 

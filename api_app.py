@@ -33,11 +33,11 @@ app.add_middleware(
 # DATABASE
 # ─────────────────────────────────────────────
 DB_CONFIG = dict(
-    host="36.253.137.34",
-    port=5436,
-    dbname="social_db",
-    user="innovator_user",
-    password="Nep@tronix9335%"
+    host=os.getenv("DB_HOST", "36.253.137.34"),
+    port=int(os.getenv("DB_PORT", 5436)),
+    dbname=os.getenv("DB_NAME", "social_db"),
+    user=os.getenv("DB_USER", "innovator_user"),
+    password=os.getenv("DB_PASSWORD", "Nep@tronix9335%")
 )
 
 def get_conn():

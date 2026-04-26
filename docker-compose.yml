@@ -1,5 +1,9 @@
 version: '3.8'
 
+networks:
+  innovator_network:
+    driver: bridge
+
 services:
   api:
     build: .
@@ -7,28 +11,56 @@ services:
       - "8006:5000"
     environment:
       ENVIRONMENT: production
-      DB_HOST: 36.253.137.34
-      DB_PORT: 5436
-      DB_NAME: social_db
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-social_db}
+      DB_USER: ${DB_USER:-innovator_user}
+      DB_PASSWORD: ${DB_PASSWORD:-Nep@tronix9335%}
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     volumes:
       - .:/app
     restart: unless-stopped
+    networks:
+      - innovator_network
 
   postgres:
-    image: postgres:13
+    image: postgres:15
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-social_db}
+      POSTGRES_USER: ${DB_USER:-innovator_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-Nep@tronix9335%}
     ports:
-      - "5432:5432"
+      - "5436:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-innovator_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - innovator_network
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@innovator.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-Nep@tronix9335%}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - innovator_network
 
 volumes:
   postgres_data:
+  pgadmin_data:

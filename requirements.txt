@@ -4,12 +4,18 @@ psycopg2-binary==2.9.6
 pandas==1.5.3
 numpy==1.24.3
 sentence-transformers==2.2.2
+transformers==4.29.2
+tokenizers==0.13.3
 scikit-learn==1.2.2
 networkx==3.1
 python-dotenv==1.0.0
 pydantic==2.5.0
-huggingface_hub==0.13.3
+huggingface_hub==0.14.1
 gunicorn
-torch --index-url https://download.pytorch.org/whl/cpu
+torch==2.1.0
+torchvision==0.16.0
 psutil
-
+apscheduler
+scipy
+nltk
+sentencepiece

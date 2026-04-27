@@ -31,13 +31,13 @@ TOP_K = 20
 user_index = faiss.read_index(USER_INDEX_FILE)
 with open(USER_ID_FILE, "rb") as f:
     user_ids = pickle.load(f)
-# print(f"  → {len(user_ids)} users loaded")
+# print(f"   {len(user_ids)} users loaded")
 
 # print("Loading post FAISS index...")
 post_index = faiss.read_index(POST_INDEX_FILE)
 with open(POST_ID_FILE, "rb") as f:
     post_ids = pickle.load(f)
-# print(f"  → {len(post_ids)} posts loaded")
+# print(f"   {len(post_ids)} posts loaded")
 
 # EXTRACT ALL POST VECTORS
 def reconstruct_all_vectors(index, ids) -> np.ndarray:
@@ -64,7 +64,7 @@ def get_user_post_ids(user_id: str) -> set:
     cur.close()
     conn.close()
     owned = {str(row[0]) for row in rows}
-    print(f"  → {len(owned)} posts owned by this user (will be excluded)")
+    print(f"   {len(owned)} posts owned by this user (will be excluded)")
     return owned
 
 # HELPERS
@@ -81,7 +81,7 @@ def get_user_vector(user_id: str) -> np.ndarray:
 def cosine_similarity(vec_a: np.ndarray, matrix_b: np.ndarray) -> np.ndarray:
     norm_a = np.linalg.norm(vec_a)
     if norm_a == 0:
-        raise ValueError("User vector is zero — cannot compute cosine similarity.")
+        raise ValueError("User vector is zero  cannot compute cosine similarity.")
     vec_a_norm = vec_a / norm_a
 
     norms_b = np.linalg.norm(matrix_b, axis=1, keepdims=True)
@@ -129,7 +129,7 @@ def search_posts_for_user(user_id: str):
 #     user_id = sys.argv[1].strip() if len(sys.argv) > 1 else input("Enter User ID: ").strip()
 #     try:
 #         results = search_posts_for_user(user_id)
-#         print(json.dumps(results))   # ← main.py reads this JSON from stdout
+#         print(json.dumps(results))   #  main.py reads this JSON from stdout
 #     except ValueError as e:
 #         print(f"ERROR: {e}", file=sys.stderr)
 #         sys.exit(1)

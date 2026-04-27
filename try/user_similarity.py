@@ -60,8 +60,8 @@ def user_based_recommendations(user_id, matrix, similarity_user):
     """
     Predict scores for unseen posts using weighted sum collaborative filtering:
 
-        r̂(u,i) = Σ s(u,v)·r(v,i)  /  Σ |s(u,v)|
-                  v ∈ N(u)              v ∈ N(u)
+        r(u,i) =  s(u,v)r(v,i)  /   |s(u,v)|
+                  v  N(u)              v  N(u)
 
     Only predicts for posts the target user has NOT interacted with.
     """
@@ -82,8 +82,8 @@ def user_based_recommendations(user_id, matrix, similarity_user):
 
     predictions = {}
     for post in unseen_posts:
-        numerator   = 0.0  # Σ s(u,v) · r(v,i)
-        denominator = 0.0  # Σ |s(u,v)|
+        numerator   = 0.0  #  s(u,v)  r(v,i)
+        denominator = 0.0  #  |s(u,v)|
 
         for sim_user, sim_score in similar_users.items():
             r_vi = matrix.loc[sim_user, post]
@@ -101,8 +101,8 @@ def user_based_recommendations(user_id, matrix, similarity_user):
 def item_based_recommendations(user_id, matrix, similarity_item):
     """
     Predict scores for unseen posts using item-based collaborative filtering:
-        r̂(u,i) = Σ s(i,j)·r(u,j)  /  Σ |s(i,j)|
-                  j ∈ N(i)              j ∈ N(i)
+        r(u,i) =  s(i,j)r(u,j)  /   |s(i,j)|
+                  j  N(i)              j  N(i)
     Only predicts for posts the target user has NOT interacted with.
     """
     if user_id not in matrix.index:
@@ -117,8 +117,8 @@ def item_based_recommendations(user_id, matrix, similarity_item):
 
     predictions = {}
     for unseen_post in unseen_posts:
-        numerator   = 0.0  # Σ s(i,j) · r(u,j)
-        denominator = 0.0  # Σ |s(i,j)|
+        numerator   = 0.0  #  s(i,j)  r(u,j)
+        denominator = 0.0  #  |s(i,j)|
 
         for seen_post in seen_posts:
             s_ij = similarity_item.loc[unseen_post, seen_post]  # item-item similarity
@@ -138,7 +138,7 @@ def item_based_recommendations(user_id, matrix, similarity_item):
 def hybrid_recommendations(user_id, matrix, user_sim_df, item_sim_df, alpha=0.5):
     """
     Hybrid score:
-        score(u,i) = α · r̂_user(u,i) + (1 - α) · r̂_item(u,i)
+        score(u,i) =   r_user(u,i) + (1 - )  r_item(u,i)
     """
     # Get user-based predicted scores
     user_scores = dict(
@@ -163,7 +163,7 @@ def hybrid_recommendations(user_id, matrix, user_sim_df, item_sim_df, alpha=0.5)
     # Sort by hybrid score descending
     top_posts = sorted(hybrid_scores, key=lambda x: x[1], reverse=True)
 
-    # ✅ Print in your format
+    #  Print in your format
     print("\nFinal Predicted unseen post:")
     for post, h_score in top_posts:
         
@@ -201,7 +201,7 @@ def main():
     # Step 3: Predict Scores for Unseen Posts per User
    
     print("PREDICTED SCORES FOR UNSEEN POSTS")
-    # print("Formula: r̂(u,i) = Σ s(u,v)·r(v,i) / Σ |s(u,v)|")
+    # print("Formula: r(u,i) =  s(u,v)r(v,i) /  |s(u,v)|")
     print("enter user_id to predict for (or 'all' for all users):")
     user_input = input().strip()
     

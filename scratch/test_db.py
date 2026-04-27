@@ -12,7 +12,7 @@ DB_CONFIG = {
 try:
     print(f"Connecting to {DB_CONFIG['host']}:{DB_CONFIG['port']}...")
     conn = psycopg2.connect(**DB_CONFIG, connect_timeout=10)
-    print("✅ Connected successfully!")
+    print(" Connected successfully!")
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM social_media_user")
     count = cur.fetchone()[0]
@@ -20,4 +20,5 @@ try:
     cur.close()
     conn.close()
 except Exception as e:
-    print(f"❌ Connection failed: {e}")
+    print(f" Connection failed: {e}")
+

@@ -30,7 +30,7 @@ async def monitor_requests(request: Request, call_next):
 
         response_time = int((time.time() - start_time) * 1000)
 
-        print(f"[{request.method}] {request.url.path} → {response_time}ms")
+        print(f"[{request.method}] {request.url.path}  {response_time}ms")
 
         # Save to DB (optional)
         log_system_metric(request.url.path, request.method, response_time, response.status_code)
@@ -40,7 +40,7 @@ async def monitor_requests(request: Request, call_next):
     except Exception as e:
         response_time = int((time.time() - start_time) * 1000)
 
-        print(f"[ERROR] {request.url.path} → {response_time}ms → {e}")
+        print(f"[ERROR] {request.url.path}  {response_time}ms  {e}")
 
         log_system_metric(request.url.path, request.method, response_time, "error")
 

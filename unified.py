@@ -2,14 +2,14 @@
 unified_app.py
 ==============
 Merged API combining:
-  - User Suggestions  →  GET /suggest/{user_id}
-  - Post/Reel Recommendations  →  GET /recommend/{user_id}
-  - Health check  →  GET /health
+  - User Suggestions    GET /suggest/{user_id}
+  - Post/Reel Recommendations    GET /recommend/{user_id}
+  - Health check    GET /health
 
 RAM Optimizations Applied:
   1. Switched to paraphrase-MiniLM-L3-v2 (~120MB RAM vs ~380MB for L6)
-  2. Batch encoding replaces per-item loop → lower peak RAM
-  3. In-process LRU embed cache → no re-encoding same text
+  2. Batch encoding replaces per-item loop  lower peak RAM
+  3. In-process LRU embed cache  no re-encoding same text
   4. Embeddings explicitly deleted after scoring
   5. CPU-only torch, TOKENIZERS_PARALLELISM=false
   6. Model cached to ./models/ so Render never re-downloads on restart
@@ -41,9 +41,9 @@ from monitoring import monitor_requests
 
 load_dotenv()
 
-# ─────────────────────────────────────────────
+# 
 # SHARED CONFIG
-# ─────────────────────────────────────────────
+# 
 DB_CONFIG = {
     "host":     os.getenv("DB_HOST",     "36.253.137.34"),
     "port":     int(os.getenv("DB_PORT", 5436)),
@@ -52,18 +52,18 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD", "Nep@tronix9335%"),
 }
 
-MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "http://localhost:8000").rstrip("/")
+MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "http://36.253.137.34:8006").rstrip("/")
 
 W_CONTENT  = float(os.getenv("W_CONTENT",  0.5))
 W_TRENDING = float(os.getenv("W_TRENDING", 0.3))
 W_RANDOM   = float(os.getenv("W_RANDOM",   0.2))
 
-# ─────────────────────────────────────────────
-# MODEL LOADING — RAM-safe for 512MB instances
-# ─────────────────────────────────────────────
+# 
+# MODEL LOADING  RAM-safe for 512MB instances
+# 
 MODEL_CACHE_DIR = os.path.join(os.path.dirname(__file__), "models")
 
-# L3 uses ~120MB RAM vs L6's ~380MB — biggest single saving
+# L3 uses ~120MB RAM vs L6's ~380MB  biggest single saving
 MODEL_NAME = os.getenv("EMBED_MODEL", "sentence-transformers/paraphrase-MiniLM-L3-v2")
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -71,7 +71,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 _MODEL: Optional[SentenceTransformer] = None
 EMBED_DIM = 384
 
-# In-process embedding cache — avoids re-encoding identical texts across requests
+# In-process embedding cache  avoids re-encoding identical texts across requests
 _EMBED_CACHE: Dict[str, np.ndarray] = {}
 _EMBED_CACHE_MAX = 2000
 
@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
     print(f"[startup] Loading SentenceTransformer: {MODEL_NAME}")
     os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
 
-    # No 'backend' kwarg — not supported in older sentence-transformers versions
+    # No 'backend' kwarg  not supported in older sentence-transformers versions
     _MODEL = SentenceTransformer(
         MODEL_NAME,
         cache_folder=MODEL_CACHE_DIR,
@@ -122,13 +122,13 @@ async def lifespan(app: FastAPI):
 
 def get_model() -> SentenceTransformer:
     if _MODEL is None:
-        raise RuntimeError("Model not loaded — lifespan did not run.")
+        raise RuntimeError("Model not loaded  lifespan did not run.")
     return _MODEL
 
 
-# ─────────────────────────────────────────────
+# 
 # DB HELPERS
-# ─────────────────────────────────────────────
+# 
 def get_db_connection():
     return psycopg2.connect(**DB_CONFIG)
 
@@ -137,18 +137,18 @@ def get_dict_connection():
     return conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
 
-# ─────────────────────────────────────────────
+# 
 # URL HELPERS
-# ─────────────────────────────────────────────
+# 
 def full_url(path: Optional[str]) -> Optional[str]:
     if not path:
         return None
     return path if path.startswith("http") else f"{MEDIA_BASE_URL}/media/{path.lstrip('/')}"
 
 
-# ═══════════════════════════════════════════════════════════
+# 
 # USER SUGGESTION ENGINE
-# ═══════════════════════════════════════════════════════════
+# 
 
 def get_already_following(cur, user_id: str) -> Set[str]:
     try:
@@ -435,9 +435,9 @@ def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
     return results[:top_n]
 
 
-# ═══════════════════════════════════════════════════════════
-#  SECTION 2 — POST / REEL RECOMMENDATION ENGINE
-# ═══════════════════════════════════════════════════════════
+# 
+#  SECTION 2  POST / REEL RECOMMENDATION ENGINE
+# 
 
 class MediaItem(BaseModel):
     id:         str
@@ -764,9 +764,9 @@ def score_posts(posts: list) -> dict:
     return score_map
 
 
-# ═══════════════════════════════════════════════════════════
+# 
 #  FASTAPI APP
-# ═══════════════════════════════════════════════════════════
+# 
 app = FastAPI(
     title="Unified Social Media API",
     version="1.0.0",
@@ -785,7 +785,7 @@ app.add_middleware(
 app.middleware("http")(monitor_requests)
 
 
-# ── Health ────────────────────────────────────────────────
+#  Health 
 @app.get("/health")
 def health():
     try:
@@ -802,7 +802,7 @@ def health():
         raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
 
 
-# ── Cache Management ──────────────────────────────────────
+#  Cache Management 
 @app.post("/admin/clear-embed-cache")
 def clear_embed_cache():
     """Manually flush the in-process embedding cache."""
@@ -812,7 +812,7 @@ def clear_embed_cache():
     return {"cleared": count, "ram_mb": round(_get_ram_mb(), 1)}
 
 
-# ── User Suggestions ──────────────────────────────────────
+#  User Suggestions 
 @app.get("/suggest/{user_id}")
 def suggest(
     user_id: str,
@@ -827,7 +827,7 @@ def suggest(
     }
 
 
-# ── Post / Reel Recommendations ───────────────────────────
+#  Post / Reel Recommendations 
 @app.get("/recommend/{user_id}", response_model=RecommendationResponse)
 def recommend(
     user_id: str,

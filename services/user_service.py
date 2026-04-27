@@ -11,9 +11,9 @@ from embeddings.cache import batch_populate, get_embed
 from embeddings.model import get_model
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # PRIVATE DB HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def _get_already_following(cur, user_id: str) -> Set[str]:
     try:
@@ -192,9 +192,9 @@ def _get_user_attributes_bulk(cur, user_ids: Set[str]) -> list:
     return list(user_map.values())
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # LOCATION SIMILARITY
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def _location_similarity(a1: str, a2: str) -> float:
     if not a1 or not a2:
@@ -207,9 +207,9 @@ def _location_similarity(a1: str, a2: str) -> float:
     return 0.6 if overlap and len(overlap) >= 2 else 0.0
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # PUBLIC  API
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def compute_user_suggestions(user_id: str, top_n: int = 10) -> list:
     """Score candidate users by text similarity, graph overlap, interests, and location."""

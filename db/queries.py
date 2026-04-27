@@ -7,17 +7,17 @@ from models.schemas import CommentItem, MediaItem, SharedPostDetails
 from utils.helpers import DB_CONFIG, full_url
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # CONNECTION
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def get_db_connection():
     return psycopg2.connect(**DB_CONFIG)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # VALIDATION & FILTERING
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def validate_user_in_db(user_id: str) -> dict:
     conn = get_db_connection()
@@ -56,9 +56,9 @@ def filter_posts_existing_in_db(post_ids: List[str]) -> List[str]:
     return [pid for pid in post_ids if pid in existing]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # POST ENRICHMENT HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def _fetch_post_media(cur, post_ids: List[str]) -> dict:
     if not post_ids:
@@ -232,9 +232,9 @@ def _current_user_reaction(cur, requesting_user_id: str, post_ids: List[str]) ->
     return result
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # FULL POST ENRICHMENT  (single DB round-trip)
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def fetch_post_details(post_ids: List[str], requesting_user_id: str) -> dict:
     """Single DB round-trip to fully enrich a list of post IDs."""

@@ -5,7 +5,7 @@ Used as one of the four signals in the recommendation engine.
 """
 import random
 import pandas as pd
-from db.queries import get_db_connection   # ← Fixed import
+from db.queries import get_db_connection   #  Fixed import
 
 def generate_random_scores() -> list[dict]:
     """
@@ -26,5 +26,5 @@ def generate_random_scores() -> list[dict]:
             "random_score": round(random.uniform(0.0, 1.0), 6)
         })
 
-    print(f"✅ Generated random scores for {len(data)} posts")
+    print(f" Generated random scores for {len(data)} posts")
     return data

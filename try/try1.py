@@ -2,7 +2,7 @@ import psycopg2
 import psycopg2.extras
 import csv
 
-# 🔹 DB CONFIG
+#  DB CONFIG
 DB_CONFIG = {
     "host": "36.253.137.34",
     "port": 5436,
@@ -16,16 +16,16 @@ def get_connection():
     return psycopg2.connect(**DB_CONFIG)
 
 
-# 🔹 GENERIC FETCH
+#  GENERIC FETCH
 def fetch_table(cur, table_name):
     cur.execute(f"SELECT * FROM {table_name};")
     return cur.fetchall()
 
 
-# 🔹 SAVE TO CSV
+#  SAVE TO CSV
 def save_to_csv(data, filename):
     if not data:
-        print(f"⚠️ No data for {filename}")
+        print(f" No data for {filename}")
         return
 
     keys = data[0].keys()
@@ -35,25 +35,25 @@ def save_to_csv(data, filename):
         writer.writeheader()
         writer.writerows(data)
 
-    print(f"💾 Saved {filename}")
+    print(f" Saved {filename}")
 
 
-# 🔹 MAIN
+#  MAIN
 def main():
     conn = get_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     try:
-        print("📥 Extracting data...")
+        print(" Extracting data...")
 
         users = fetch_table(cur, "social_media_user")
         following = fetch_table(cur, "social_media_user_following")
         reactions = fetch_table(cur, "social_media_reaction")
         comments = fetch_table(cur, "social_media_comment")
 
-        print("✅ Data fetched!")
+        print(" Data fetched!")
 
-        # 🔹 Save each table
+        #  Save each table
         save_to_csv(users, "users.csv")
         save_to_csv(following, "following.csv")
         save_to_csv(reactions, "reactions.csv")

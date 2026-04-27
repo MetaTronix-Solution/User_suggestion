@@ -18,9 +18,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ─────────────────────────────────────────────
+# 
 # MODEL
-# ─────────────────────────────────────────────
+# 
 
 MODEL_NAME = "sentence-transformers/paraphrase-MiniLM-L3-v2"
 MODEL_CACHE_DIR = "./models"
@@ -66,9 +66,9 @@ def cache_embed(text: str, model):
     return emb
 
 
-# ─────────────────────────────────────────────
+# 
 # DB
-# ─────────────────────────────────────────────
+# 
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "36.253.137.34"),
@@ -83,9 +83,9 @@ def db():
     return psycopg2.connect(**DB_CONFIG)
 
 
-# ─────────────────────────────────────────────
+# 
 # FIXED USER SUGGESTION ENGINE
-# ─────────────────────────────────────────────
+# 
 
 def get_already_following(cur, user_id):
     cur.execute("SELECT to_user_id FROM social_media_user_following WHERE from_user_id=%s", (user_id,))
@@ -172,9 +172,9 @@ def compute_suggestions(user_id, top_n=10):
     return df[["id", "score"]].head(top_n).to_dict(orient="records")
 
 
-# ─────────────────────────────────────────────
+# 
 # FASTAPI
-# ─────────────────────────────────────────────
+# 
 
 app = FastAPI()
 

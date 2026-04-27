@@ -1,5 +1,5 @@
 """
-main.py — Post Recommendation Score Generator + FastAPI
+main.py  Post Recommendation Score Generator + FastAPI
 --------------------------------------------------------
 Inputs:
   - data/post_random_scores.csv
@@ -33,9 +33,9 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# ──────────────────────────────────────────────
+# 
 # DB CONFIG
-# ──────────────────────────────────────────────
+# 
 DB_CONFIG = dict(
     host="36.253.137.34",
     port=5436,
@@ -50,9 +50,9 @@ def get_db_connection():
     return psycopg2.connect(**DB_CONFIG)
 
 
-# ──────────────────────────────────────────────
+# 
 # CONFIG
-# ──────────────────────────────────────────────
+# 
 RANDOM_SCORES_CSV   = "data/post_random_scores.csv"
 TRENDING_SCORES_CSV = "data/post_trending_scores.csv"
 CONTENT_SCORER_FILE = "score/content_score.py"
@@ -72,9 +72,9 @@ OUTPUT_CSV = False   # disabled by default for API; CLI still saves
 MEDIA_BASE_URL = "http://36.253.137.34:8005"
 
 
-# ──────────────────────────────────────────────
+# 
 # FASTAPI APP
-# ──────────────────────────────────────────────
+# 
 app = FastAPI(
     title="Social Media Recommendation API",
     description="Returns ranked post recommendations for a given user based on content, trending, and random scores.",
@@ -89,9 +89,9 @@ app.add_middleware(
 )
 
 
-# ──────────────────────────────────────────────
+# 
 # RESPONSE MODELS
-# ──────────────────────────────────────────────
+# 
 class MediaItem(BaseModel):
     id:         str
     file:       str
@@ -166,9 +166,9 @@ class PostRecommendation(BaseModel):
     created_at:      Optional[str]   = None
 
 
-# ──────────────────────────────────────────────
-# DB HELPERS — fetch enriched post details
-# ──────────────────────────────────────────────
+# 
+# DB HELPERS  fetch enriched post details
+# 
 
 def _fetch_post_media(cur, post_ids: List[str]) -> dict:
     """Return {post_id: [MediaItem, ...]} for all given post IDs."""
@@ -372,7 +372,7 @@ def _fetch_shared_post_details(cur, shared_post_ids: List[str]) -> dict:
 
 
 def _is_followed(cur, follower_id: str, followee_ids: List[str]) -> dict:
-    """Return {post_owner_id: bool} — whether follower_id follows each owner."""
+    """Return {post_owner_id: bool}  whether follower_id follows each owner."""
     if not followee_ids or not follower_id:
         return {fid: False for fid in followee_ids}
     cur.execute(
@@ -418,7 +418,7 @@ def fetch_post_details(post_ids: List[str], requesting_user_id: Optional[str] = 
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # ── Core post rows ──────────────────────────────────────────
+            #  Core post rows 
             cur.execute(
                 """
                 SELECT p.id::text,
@@ -446,7 +446,7 @@ def fetch_post_details(post_ids: List[str], requesting_user_id: Optional[str] = 
             owner_ids       = list({r["user_id"] for r in posts_raw.values()})
             shared_post_ids = [r["shared_post"] for r in posts_raw.values() if r.get("shared_post")]
 
-            # ── Parallel lookups ────────────────────────────────────────
+            #  Parallel lookups 
             media_map        = _fetch_post_media(cur, found_ids)
             category_map     = _fetch_post_categories(cur, found_ids)
             reaction_map     = _fetch_reactions(cur, found_ids)
@@ -457,7 +457,7 @@ def fetch_post_details(post_ids: List[str], requesting_user_id: Optional[str] = 
             follow_map       = _is_followed(cur, requesting_user_id or "", owner_ids)
             cur_reaction_map = _current_user_reaction(cur, requesting_user_id or "", found_ids)
 
-            # ── Assemble ────────────────────────────────────────────────
+            #  Assemble 
             result = {}
             for pid, row in posts_raw.items():
                 rxn     = reaction_map.get(pid, {})
@@ -488,9 +488,9 @@ def fetch_post_details(post_ids: List[str], requesting_user_id: Optional[str] = 
         conn.close()
 
 
-# ──────────────────────────────────────────────
+# 
 # CONTENT SCORER SUBPROCESS
-# ──────────────────────────────────────────────
+# 
 def get_content_scores(user_id: str) -> pd.DataFrame:
     scorer_dir = os.path.dirname(os.path.abspath(CONTENT_SCORER_FILE))
     scorer_abs = os.path.abspath(CONTENT_SCORER_FILE)
@@ -525,9 +525,9 @@ def get_content_scores(user_id: str) -> pd.DataFrame:
     return df
 
 
-# ──────────────────────────────────────────────
+# 
 # DATA LOADERS
-# ──────────────────────────────────────────────
+# 
 def load_random_scores() -> pd.DataFrame:
     df = pd.read_csv(RANDOM_SCORES_CSV)
     df = df[["post_id", "random_score"]].drop_duplicates("post_id")
@@ -548,9 +548,9 @@ def load_trending_scores() -> pd.DataFrame:
     return df
 
 
-# ──────────────────────────────────────────────
+# 
 # NORMALIZATION
-# ──────────────────────────────────────────────
+# 
 def min_max_normalize(series: pd.Series) -> pd.Series:
     lo, hi = series.min(), series.max()
     if hi == lo:
@@ -558,24 +558,24 @@ def min_max_normalize(series: pd.Series) -> pd.Series:
     return (series - lo) / (hi - lo)
 
 
-# ──────────────────────────────────────────────
+# 
 # CORE PIPELINE (shared by API + CLI)
-# ──────────────────────────────────────────────
+# 
 def get_recommendations(
     user_id: str,
     top_n: int = TOP_N,
     save_csv: bool = OUTPUT_CSV,
 ) -> pd.DataFrame:
-    print(f"\n🔍 Generating recommendations for user_id: {user_id}")
+    print(f"\n Generating recommendations for user_id: {user_id}")
 
     df_random   = load_random_scores()
     df_trending = load_trending_scores()
 
     df = pd.merge(df_random, df_trending, on="post_id", how="inner")
-    print(f"  → Merged CSV dataset: {len(df)} posts")
+    print(f"   Merged CSV dataset: {len(df)} posts")
 
     df_content = get_content_scores(user_id)
-    print(f"  → {len(df_content)} posts scored by content model")
+    print(f"   {len(df_content)} posts scored by content model")
 
     df = pd.merge(df, df_content, on="post_id", how="left")
     df["content_score"] = df["content_score"].fillna(0.0)
@@ -605,14 +605,14 @@ def get_recommendations(
     if save_csv:
         out_file = f"recommended_posts_{user_id}.csv"
         result.to_csv(out_file)
-        print(f"  ✅ Saved → {out_file}")
+        print(f"   Saved  {out_file}")
 
     return result
 
 
-# ──────────────────────────────────────────────
+# 
 # API ENDPOINTS
-# ──────────────────────────────────────────────
+# 
 @app.get("/health", tags=["Health"])
 def health_check():
     """Check if the API is running."""
@@ -633,9 +633,9 @@ def recommend(
     Returns the top-N recommended posts for the given **user_id**,
     ranked by a weighted combination of content, trending, and random scores.
 
-    - **content_score** — FAISS cosine similarity (50 %)
-    - **trending_score** — engagement-based trending (40 %)
-    - **random_score**   — exploration factor (10 %)
+    - **content_score**  FAISS cosine similarity (50 %)
+    - **trending_score**  engagement-based trending (40 %)
+    - **random_score**    exploration factor (10 %)
 
     Each post is enriched with full details from the database:
     media, categories, reactions, comments, shared-post info, and follow status.
@@ -649,7 +649,7 @@ def recommend(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    # Score lookup — keyed by post_id string
+    # Score lookup  keyed by post_id string
     score_map: dict = {}
     for rank, row in df.iterrows():
         score_map[str(row["post_id"])] = {
@@ -671,7 +671,7 @@ def recommend(
     for pid in post_ids:          # preserve ranked order
         detail = details_map.get(pid)
         if not detail:
-            continue              # post not found in DB — skip
+            continue              # post not found in DB  skip
         scores = score_map[pid]
         posts.append(
             PostDetail(
@@ -691,9 +691,9 @@ def recommend(
     )
 
 
-# ──────────────────────────────────────────────
+# 
 # CLI ENTRY POINT
-# ──────────────────────────────────────────────
+# 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         uid = input("Enter User ID: ").strip()
@@ -701,16 +701,16 @@ if __name__ == "__main__":
         uid = sys.argv[1].strip()
 
     if not uid:
-        print("❌ No user ID provided.")
+        print(" No user ID provided.")
         sys.exit(1)
 
     try:
         result = get_recommendations(uid, top_n=TOP_N, save_csv=True)
-        print(f"\n{'─'*76}")
+        print(f"\n{''*76}")
         print(f"  Top {len(result)} Recommended Posts  |  User: {uid}")
-        print(f"{'─'*76}")
+        print(f"{''*76}")
         print(f"  {'Rank':<5} {'Post ID':<38} {'Final':>7} {'Content':>8} {'Trend':>7} {'Rand':>6}")
-        print(f"  {'─'*70}")
+        print(f"  {''*70}")
         for rank, row in result.iterrows():
             print(
                 f"  {rank:<5} {str(row['post_id']):<38} "
@@ -719,10 +719,10 @@ if __name__ == "__main__":
                 f"{row['trending_score']:>7.4f} "
                 f"{row['random_score']:>6.4f}"
             )
-        print(f"{'─'*76}\n")
+        print(f"{''*76}\n")
     except (ValueError, RuntimeError) as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n Error: {e}")
         sys.exit(1)
     except FileNotFoundError as e:
-        print(f"\n❌ File not found: {e}")
+        print(f"\n File not found: {e}")
         sys.exit(1)

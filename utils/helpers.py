@@ -10,7 +10,7 @@ load_dotenv()
 def _get_env(key: str, default=None, required=False):
     value = os.getenv(key)
     if required and value is None:
-        print(f"❌ ERROR: Missing required environment variable: {key}")
+        print(f" ERROR: Missing required environment variable: {key}")
         print("   Please add it to your .env file and try again.")
         sys.exit(1)
     return value if value is not None else default

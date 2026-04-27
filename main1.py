@@ -1,5 +1,5 @@
 # """
-# main.py — Post Recommendation Score Generator + FastAPI
+# main.py  Post Recommendation Score Generator + FastAPI
 # --------------------------------------------------------
 # Inputs:
 #   - data/post_random_scores.csv
@@ -167,7 +167,7 @@
 #     return f"{MEDIA_BASE_URL}/media/{path.lstrip('/')}"
 
 
-# # DB STEP 1 — Validate user_id exists
+# # DB STEP 1  Validate user_id exists
 # def validate_user_in_db(user_id: str) -> dict:
 #     conn = get_db_connection()
 #     try:
@@ -194,7 +194,7 @@
 #         conn.close()
 
 
-# # DB STEP 2 — Cross-check post_ids against DB
+# # DB STEP 2  Cross-check post_ids against DB
 # def filter_posts_existing_in_db(post_ids: List[str]) -> List[str]:
 #     if not post_ids:
 #         return []
@@ -414,7 +414,7 @@
 #     return result
 
 
-# # DB STEP 3 — Fetch full enriched post details
+# # DB STEP 3  Fetch full enriched post details
 # def fetch_post_details(post_ids: List[str], requesting_user_id: str) -> dict:
 #     if not post_ids:
 #         return {}
@@ -549,18 +549,18 @@
 
 # # CORE SCORING PIPELINE
 # def get_recommendations(user_id: str, top_n: int = TOP_N, save_csv: bool = OUTPUT_CSV) -> pd.DataFrame:
-#     print(f"\n🔍 Scoring for user_id: {user_id}")
+#     print(f"\n Scoring for user_id: {user_id}")
 
 #     df_random   = load_random_scores()
 #     df_trending = load_trending_scores()
 #     df          = pd.merge(df_random, df_trending, on="post_id", how="inner")
-#     print(f"  → CSV dataset: {len(df)} posts")
+#     print(f"   CSV dataset: {len(df)} posts")
 
 #     df_content = get_content_scores(user_id)
-#     print(f"  → Content model: {len(df_content)} posts scored")
+#     print(f"   Content model: {len(df_content)} posts scored")
 
 #     df_collaborative = get_collaborative_scores(user_id)
-#     print(f"  → Collaborative model: {len(df_collaborative)} posts scored")
+#     print(f"   Collaborative model: {len(df_collaborative)} posts scored")
 
 #     df = pd.merge(df, df_content, on="post_id", how="left")
 #     df["content_score"] = df["content_score"].fillna(0.0)
@@ -595,7 +595,7 @@
 #     if save_csv:
 #         out_file = f"recommended_posts_{user_id}.csv"
 #         result.to_csv(out_file)
-#         print(f"  ✅ Saved → {out_file}")
+#         print(f"   Saved  {out_file}")
 
 #     return result
 
@@ -618,7 +618,7 @@
 # ):
    
    
-#     # Step 1 — Validate user
+#     # Step 1  Validate user
 #     try:
 #         validate_user_in_db(user_id)
 #     except ValueError as e:
@@ -626,7 +626,7 @@
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=f"user is not found in database: {e}")
 
-#     # Step 2 — Score
+#     # Step 2  Score
 #     try:
 #         df = get_recommendations(user_id, top_n=top_n, save_csv=False)
 #     except RuntimeError as e:
@@ -645,14 +645,14 @@
 #     }
 #     all_scored_ids = list(score_map.keys())
 
-#     # Step 3 — Filter to DB-existing posts
+#     # Step 3  Filter to DB-existing posts
 #     try:
 #         existing_ids = filter_posts_existing_in_db(all_scored_ids)
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=f"DB filter error: {e}")
 
 #     print(
-#         f"  → {len(all_scored_ids)} scored | "
+#         f"   {len(all_scored_ids)} scored | "
 #         f"{len(existing_ids)} in DB | "
 #         f"top {top_n} returned"
 #     )
@@ -661,13 +661,13 @@
 #     if not final_ids:
 #         return RecommendationResponse(user_id=user_id, total_posts=0, top_n=top_n, posts=[])
 
-#     # Step 4+5 — Fetch enriched details
+#     # Step 4+5  Fetch enriched details
 #     try:
 #         details_map = fetch_post_details(final_ids, requesting_user_id=user_id)
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=f"DB detail error: {e}")
 
-#     # Step 6 — Assemble in ranked order
+#     # Step 6  Assemble in ranked order
 #     posts: List[PostDetail] = []
 #     for pid in final_ids:
 #         detail = details_map.get(pid)
@@ -714,11 +714,11 @@
 #             cwd=os.path.dirname(abs_path),
 #         )
 #         if result.returncode == 0:
-#             print(f"  ✅ [{script_name}] completed successfully.")
+#             print(f"   [{script_name}] completed successfully.")
 #         else:
-#             print(f"  ❌ [{script_name}] failed:\n{result.stderr.strip()}")
+#             print(f"   [{script_name}] failed:\n{result.stderr.strip()}")
 #     except Exception as e:
-#         print(f"  ❌ [{script_name}] exception: {e}")
+#         print(f"   [{script_name}] exception: {e}")
 
 
 # def run_pipeline():
@@ -726,7 +726,7 @@
 #     Step 1: Run embedding scripts in parallel.
 #     Step 2: Run trending_score.py (after embeddings finish).
 #     """
-#     print("\n🔄 [Pipeline] Starting...")
+#     print("\n [Pipeline] Starting...")
 
 #     with ThreadPoolExecutor(max_workers=2) as executor:
 #         futures = [executor.submit(run_script, s) for s in SCRIPTS["embeddings"]]
@@ -738,7 +738,7 @@
 #         for f in futures:
 #             f.result()
 
-#     print("✅ [Pipeline] Complete.\n")
+#     print(" [Pipeline] Complete.\n")
 
 
 
@@ -748,28 +748,28 @@
 # scheduler.add_job(run_pipeline,     "interval", minutes=5,  id="pipeline_job")
 # scheduler.start()
 
-# print("🕐 Scheduler started:")
-# print("   • run_pipeline()            → every 5 minutes")
-# print("     └─ embeddings (parallel)")
-# print("     └─ trending_score.py")
+# print(" Scheduler started:")
+# print("    run_pipeline()             every 5 minutes")
+# print("      embeddings (parallel)")
+# print("      trending_score.py")
 
 
 # if __name__ == "__main__":
 #     uid = sys.argv[1].strip() if len(sys.argv) >= 2 else input("Enter User ID: ").strip()
 
 #     if not uid:
-#         print("❌ No user ID provided.")
+#         print(" No user ID provided.")
 #         sys.exit(1)
 
 #     # Validate user
 #     try:
 #         info = validate_user_in_db(uid)
-#         print(f"  ✅ DB user: {info['username']} ({uid})")
+#         print(f"   DB user: {info['username']} ({uid})")
 #     except ValueError as e:
-#         print(f"\n❌ {e}")
+#         print(f"\n {e}")
 #         sys.exit(1)
 #     except Exception as e:
-#         print(f"\n❌ DB error: {e}")
+#         print(f"\n DB error: {e}")
 #         sys.exit(1)
 
 #     # Get recommendations
@@ -780,7 +780,7 @@
 #         final_ids    = existing_ids[:TOP_N]
 #         score_map    = {str(row["post_id"]): row for _, row in df.iterrows()}
 
-#         print(f"  → {len(all_ids)} scored | {len(existing_ids)} in DB | top {len(final_ids)}")
+#         print(f"   {len(all_ids)} scored | {len(existing_ids)} in DB | top {len(final_ids)}")
        
 #         print(f"  Top {len(final_ids)} Posts  |  User: {uid}")
         
@@ -795,11 +795,11 @@
 #                 f"{r['trending_score']:>7.4f} {r['random_score']:>6.4f}"
 #             )
 
-#         print(f"{'─'*76}\n")
+#         print(f"{''*76}\n")
 
 #     except (ValueError, RuntimeError) as e:
-#         print(f"\n❌ {e}")
+#         print(f"\n {e}")
 #         sys.exit(1)
 #     except FileNotFoundError as e:
-#         print(f"\n❌ File not found: {e}")
+#         print(f"\n File not found: {e}")
 #         sys.exit(1)

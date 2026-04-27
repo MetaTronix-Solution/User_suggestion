@@ -18,9 +18,9 @@ TOP_N      = 10
 OUTPUT_CSV = False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # SCORE LOADERS
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def _get_content_scores(user_id: str) -> pd.DataFrame:
     try:
@@ -66,22 +66,22 @@ def _load_trending_scores() -> pd.DataFrame:
     return df
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # SCORE PIPELINE
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def _build_score_df(user_id: str, top_n: int, save_csv: bool = False) -> pd.DataFrame:
     """Merge all four scoring signals and return a ranked DataFrame."""
-    print(f"\n🔍 Scoring for user_id: {user_id}")
+    print(f"\n Scoring for user_id: {user_id}")
 
     df = pd.merge(_load_random_scores(), _load_trending_scores(), on="post_id", how="inner")
-    print(f"  → CSV dataset: {len(df)} posts")
+    print(f"   CSV dataset: {len(df)} posts")
 
     df_content = _get_content_scores(user_id)
-    print(f"  → Content model: {len(df_content)} posts scored")
+    print(f"   Content model: {len(df_content)} posts scored")
 
     df_collab = _get_collaborative_scores(user_id)
-    print(f"  → Collaborative model: {len(df_collab)} posts scored")
+    print(f"   Collaborative model: {len(df_collab)} posts scored")
 
     df = pd.merge(df, df_content, on="post_id", how="left")
     df["content_score"] = df["content_score"].fillna(0.0)
@@ -115,20 +115,20 @@ def _build_score_df(user_id: str, top_n: int, save_csv: bool = False) -> pd.Data
     if save_csv:
         out = f"recommended_posts_{user_id}.csv"
         result.to_csv(out)
-        print(f"  ✅ Saved → {out}")
+        print(f"  Saved -> {out}")
 
     return result
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # PUBLIC API
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def compute_post_recommendations(
     user_id: str, top_n: int = TOP_N
 ) -> RecommendationResponse:
     """
-    Full pipeline: validate → score → DB filter → enrich → assemble.
+    Full pipeline: validate  score  DB filter  enrich  assemble.
     Shared by the API endpoint and the CLI.
     """
     validate_user_in_db(user_id)
@@ -145,7 +145,7 @@ def compute_post_recommendations(
     }
 
     existing_ids = filter_posts_existing_in_db(list(score_map.keys()))
-    print(f"  → {len(score_map)} scored | {len(existing_ids)} in DB | top {top_n} returned")
+    print(f"   {len(score_map)} scored | {len(existing_ids)} in DB | top {top_n} returned")
 
     final_ids = existing_ids[:top_n]
     if not final_ids:

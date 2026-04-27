@@ -19,9 +19,9 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 _MODEL: Optional[SentenceTransformer] = None
 
 
-# ─────────────────────────────────────────────
+# 
 # CORE LOADER (USED BY BOTH FASTAPI + CLI)
-# ─────────────────────────────────────────────
+# 
 def load_model() -> SentenceTransformer:
     global _MODEL
 
@@ -43,9 +43,9 @@ def load_model() -> SentenceTransformer:
     return _MODEL
 
 
-# ─────────────────────────────────────────────
+# 
 # FASTAPI LIFESPAN (USES SAME LOADER)
-# ─────────────────────────────────────────────
+# 
 @asynccontextmanager
 async def lifespan(app):
     load_model()
@@ -54,8 +54,8 @@ async def lifespan(app):
     clear_embed_cache()
 
 
-# ─────────────────────────────────────────────
+# 
 # OPTIONAL STRICT ACCESS (ONLY IF YOU WANT SAFETY)
-# ─────────────────────────────────────────────
+# 
 def get_model() -> SentenceTransformer:
     return load_model()

@@ -1,5 +1,5 @@
 """
-main.py — Unified Social Media API
+main.py  Unified Social Media API
 ====================================
 Run API server:
   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
@@ -33,14 +33,14 @@ from monitoring import monitor_requests
 from routers.post_router import router as post_router
 from routers.user_router import router as user_router
 from services.post_service import TOP_N, compute_post_recommendations
-from services.user_service import compute_user_suggestions   # ✅ ADDED
+from services.user_service import compute_user_suggestions   #  ADDED
 from utils.helpers import _get_ram_mb
 
 load_dotenv()
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # APP FACTORY
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 app = FastAPI(
     title="Unified Social Media API",
@@ -63,7 +63,7 @@ app.include_router(user_router)
 app.include_router(post_router)
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
+#  Health 
 
 @app.get("/", tags=["Health"])
 def home():
@@ -86,7 +86,7 @@ def health():
         raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
 
 
-# ── Cache Management ──────────────────────────────────────────────────────────
+#  Cache Management 
 
 @app.post("/admin/clear-embed-cache", tags=["Admin"])
 def clear_embed_cache_endpoint():
@@ -94,9 +94,9 @@ def clear_embed_cache_endpoint():
     return {"cleared": count, "ram_mb": round(_get_ram_mb(), 1)}
 
 
-# ═════════════════════════════════════════════════════════════════════════════
+# 
 # BACKGROUND PIPELINE
-# ═════════════════════════════════════════════════════════════════════════════
+# 
 
 PIPELINE_SCRIPTS = {
     "embeddings": [
@@ -120,69 +120,69 @@ def _run_script(script_path: str):
             cwd=os.path.dirname(abs_path),
         )
         if result.returncode == 0:
-            print(f"  ✅ [{name}] completed successfully.")
+            print(f"  SUCCESS: [{name}] completed successfully.")
         else:
-            print(f"  ❌ [{name}] failed:\n{result.stderr.strip()}")
+            print(f"  FAILED: [{name}] failed:\n{result.stderr.strip()}")
     except Exception as e:
-        print(f"  ❌ [{name}] exception: {e}")
+        print(f"  FAILED: [{name}] exception: {e}")
 
 
 def run_pipeline():
-    print("\n🔄 [Pipeline] Starting...")
+    print("[Pipeline] Starting...")
     with ThreadPoolExecutor(max_workers=2) as executor:
         for f in [executor.submit(_run_script, s) for s in PIPELINE_SCRIPTS["embeddings"]]:
             f.result()
     with ThreadPoolExecutor(max_workers=2) as executor:
         for f in [executor.submit(_run_script, s) for s in PIPELINE_SCRIPTS["scores"]]:
             f.result()
-    print("✅ [Pipeline] Complete.\n")
+    print("Pipeline Complete.")
 
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(run_pipeline, "interval", minutes=5, id="pipeline_job")
 scheduler.start()
 
-print("🕐 Scheduler started:")
-print("   • run_pipeline() → every 5 minutes")
-print("     └─ embeddings (parallel)")
-print("     └─ trending_score.py")
+print("Scheduler started:")
+print("   * run_pipeline() -> every 5 minutes")
+print("     |-- embeddings (parallel)")
+print("     |-- trending_score.py")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
+# 
 # CLI
-# ═════════════════════════════════════════════════════════════════════════════
+# 
 
 if __name__ == "__main__":
 
     uid = sys.argv[1].strip() if len(sys.argv) >= 2 else input("Enter User ID: ").strip()
 
     if not uid:
-        print("❌ No user ID provided.")
+        print(" No user ID provided.")
         sys.exit(1)
 
-    # ── Validate user ─────────────────────────────────────────────
+    #  Validate user 
     try:
         info = validate_user_in_db(uid)
-        print(f"  ✅ DB user: {info['username']} ({uid})")
+        print(f"  DB user: {info['username']} ({uid})")
     except Exception as e:
-        print(f"\n❌ DB error: {e}")
+        print(f"DB error: {e}")
         sys.exit(1)
 
-    # ── Run pipeline ──────────────────────────────────────────────
-    print("\n🔄 Running pipeline to build indexes and scores...")
+    #  Run pipeline 
+    print("Running pipeline to build indexes and scores...")
     run_pipeline()
 
-    # ✅ Pre-warm embedding model once for both scorers
-    print("🔥 Warming up embedding model...")
+    #  Pre-warm embedding model once for both scorers
+    print("Warming up embedding model...")
     from embeddings.model import get_model
     get_model()
     print("   Model ready.\n")
 
-    # ── POST RECOMMENDATIONS ──────────────────────────────────────
+    #  POST RECOMMENDATIONS 
     try:
         response = compute_post_recommendations(uid, top_n=TOP_N)
 
-        print(f"\n📌 Top {len(response.posts)} Posts | User: {uid}")
+        print(f"Top {len(response.posts)} Posts | User: {uid}")
         print(f"{'#':<4} {'Post ID':<38} {'Final':>7} {'Content':>8} {'Trend':>7} {'Rand':>6}")
 
         for rank, post in enumerate(response.posts, 1):
@@ -193,14 +193,14 @@ if __name__ == "__main__":
             )
 
     except Exception as e:
-        print(f"\n❌ Post recommendation failed: {e}")
+        print(f"\n Post recommendation failed: {e}")
         sys.exit(1)
 
-    # ── USER RECOMMENDATIONS (NEW) ───────────────────────────────
+    #  USER RECOMMENDATIONS (NEW) 
     try:
-        print("\n🔍 Computing user recommendations...")
+        print("\n Computing user recommendations...")
 
-        # ✅ Pre-warm model once before user suggestions
+        #  Pre-warm model once before user suggestions
         # (post scoring already loaded it; this ensures it's cached)
         from embeddings.model import get_model as _warm
         _warm()
@@ -208,9 +208,9 @@ if __name__ == "__main__":
         user_suggestions = compute_user_suggestions(uid)
 
         if not user_suggestions:
-            print("⚠️ No user recommendations found")
+            print(" No user recommendations found")
         else:
-            print("\n👥 Top User Suggestions:")
+            print("\n Top User Suggestions:")
             print(f"{'#':<4} {'User ID':<38} {'Score':>8}")
 
             for i, u in enumerate(user_suggestions[:10], 1):
@@ -224,4 +224,4 @@ if __name__ == "__main__":
                 print(f"{i:<4} {user_id:<38} {float(score):>8.4f}")
 
     except Exception as e:
-        print(f"\n❌ User recommendation failed: {e}")
+        print(f"\n User recommendation failed: {e}")

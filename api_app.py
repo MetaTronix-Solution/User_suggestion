@@ -13,9 +13,9 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# ─────────────────────────────────────────────
+# 
 # APP SETUP
-# ─────────────────────────────────────────────
+# 
 app = FastAPI(
     title="Friend Suggestion API",
     version="1.0.0"
@@ -29,11 +29,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─────────────────────────────────────────────
+# 
 # DATABASE
-# ─────────────────────────────────────────────
+# 
 def _clean_host(host: str) -> str:
-    """Strip http:// or https:// prefix from host — psycopg2 needs a bare IP."""
+    """Strip http:// or https:// prefix from host  psycopg2 needs a bare IP."""
     for prefix in ("https://", "http://"):
         if host.startswith(prefix):
             host = host[len(prefix):]
@@ -52,9 +52,9 @@ def get_conn():
     conn.autocommit = True
     return conn
 
-# ─────────────────────────────────────────────
+# 
 # MODELS
-# ─────────────────────────────────────────────
+# 
 class SuggestedUser(BaseModel):
     user_id: str
     username: Optional[str]
@@ -66,9 +66,9 @@ class SuggestedUser(BaseModel):
     breakdown: dict
     weights_used: dict
 
-# ─────────────────────────────────────────────
+# 
 # SAFE DB HELPERS
-# ─────────────────────────────────────────────
+# 
 def safe_fetch(cur, query, params=()):
     try:
         cur.execute(query, params)
@@ -85,9 +85,9 @@ def safe_fetchone(cur, query, params=()):
         cur.connection.rollback()
         return None
 
-# ─────────────────────────────────────────────
+# 
 # FILTERS
-# ─────────────────────────────────────────────
+# 
 def get_already_following(cur, user_id) -> Set[str]:
     rows = safe_fetch(cur,
         "SELECT to_user_id FROM social_media_user_following WHERE from_user_id = %s",
@@ -110,9 +110,9 @@ def validate_user(cur, user_id: str) -> bool:
     )
     return row is not None
 
-# ─────────────────────────────────────────────
+# 
 # CANDIDATES
-# ─────────────────────────────────────────────
+# 
 def get_bfs_candidates(cur, user_id):
     query = """
         WITH RECURSIVE fof AS (
@@ -159,9 +159,9 @@ def get_fallback(cur, exclude, limit=200):
         )
     return {r[0] for r in rows}
 
-# ─────────────────────────────────────────────
+# 
 # USER ATTRIBUTES
-# ─────────────────────────────────────────────
+# 
 def get_user_attributes(cur, user_ids):
     if not user_ids:
         return []
@@ -199,9 +199,9 @@ def get_user_attributes(cur, user_ids):
 
     return result
 
-# ─────────────────────────────────────────────
+# 
 # CORE ENGINE (TF-IDF)
-# ─────────────────────────────────────────────
+# 
 def compute_suggestions(cur, user_id: str, top_n: int = 10):
 
     following = get_already_following(cur, user_id)
@@ -268,9 +268,9 @@ def compute_suggestions(cur, user_id: str, top_n: int = 10):
     results.sort(key=lambda x: x["affinity_score"], reverse=True)
     return results[:top_n], "production"
 
-# ─────────────────────────────────────────────
+# 
 # ROUTES
-# ─────────────────────────────────────────────
+# 
 @app.get("/")
 def root():
     return {"message": "API running"}
@@ -314,9 +314,9 @@ def suggest(user_id: str, limit: int = Query(10, ge=1, le=50)):
         cur.close()
         conn.close()
 
-# ─────────────────────────────────────────────
+# 
 # PORT FIX (CRITICAL FOR RENDER)
-# ─────────────────────────────────────────────
+# 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 5000))

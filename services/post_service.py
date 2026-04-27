@@ -1,11 +1,14 @@
 from typing import List
+import random
 
 import numpy as np
 import pandas as pd
 
 from db.queries import (
     fetch_post_details,
+    fetch_reel_details,
     filter_posts_existing_in_db,
+    filter_reels_existing_in_db,
     validate_user_in_db,
 )
 from models.schemas import PostDetail, RecommendationResponse
@@ -18,9 +21,9 @@ TOP_N      = 10
 OUTPUT_CSV = False
 
 
-# 
+# ──────────────────────────────────────────────────────────────────────────────
 # SCORE LOADERS
-# 
+# ──────────────────────────────────────────────────────────────────────────────
 
 def _get_content_scores(user_id: str) -> pd.DataFrame:
     try:
@@ -66,13 +69,13 @@ def _load_trending_scores() -> pd.DataFrame:
     return df
 
 
-# 
-# SCORE PIPELINE
-# 
+# ──────────────────────────────────────────────────────────────────────────────
+# POST SCORE PIPELINE
+# ──────────────────────────────────────────────────────────────────────────────
 
 def _build_score_df(user_id: str, top_n: int, save_csv: bool = False) -> pd.DataFrame:
     """Merge all four scoring signals and return a ranked DataFrame."""
-    print(f"\n Scoring for user_id: {user_id}")
+    print(f"\n  Scoring posts for user_id: {user_id}")
 
     df = pd.merge(_load_random_scores(), _load_trending_scores(), on="post_id", how="inner")
     print(f"   CSV dataset: {len(df)} posts")
@@ -101,7 +104,12 @@ def _build_score_df(user_id: str, top_n: int, save_csv: bool = False) -> pd.Data
         REC_WEIGHTS["collaborative_score"] * df["collaborative_score_norm"]
     )
 
-    df = df.sort_values("final_score", ascending=False).reset_index(drop=True)
+    df = df.sort_values("final_score", ascending=False)
+
+    # 🚨 REMOVE DUPLICATES HERE
+    df = df.drop_duplicates(subset=["post_id"], keep="first")
+
+    df = df.reset_index(drop=True)
     df.index += 1
 
     base_cols  = ["post_id", "final_score", "content_score", "trending_score", "random_score"]
@@ -120,44 +128,191 @@ def _build_score_df(user_id: str, top_n: int, save_csv: bool = False) -> pd.Data
     return result
 
 
-# 
+# ──────────────────────────────────────────────────────────────────────────────
+# REEL SCORE PIPELINE
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _build_reel_score_df(top_n: int) -> pd.DataFrame:
+    """
+    Score reels using views_count as trending proxy + random noise.
+    Pulls directly from DB — no CSV needed.
+    """
+    from db.queries import get_db_connection
+    import psycopg2.extras
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id::text AS reel_id, views_count
+                FROM   social_media_reel
+                WHERE  video IS NOT NULL
+                ORDER  BY created_at DESC
+                LIMIT  %s
+                """,
+                (top_n * 10,),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return pd.DataFrame(columns=["reel_id", "final_score", "trending_score", "random_score"])
+
+    df = pd.DataFrame(rows)
+    df["reel_id"]        = df["reel_id"].astype(str)
+    df["random_score"]   = np.random.rand(len(df))
+    df["trending_score"] = df["views_count"].astype(float)
+
+    df["trending_score_norm"] = _min_max_normalize(df["trending_score"])
+    df["random_score_norm"]   = _min_max_normalize(df["random_score"])
+
+    df["final_score"] = (
+        0.6 * df["trending_score_norm"] +
+        0.4 * df["random_score_norm"]
+    )
+
+    return (
+        df[["reel_id", "final_score", "trending_score", "random_score"]]
+        .sort_values("final_score", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # PUBLIC API
-# 
+# ──────────────────────────────────────────────────────────────────────────────
 
 def compute_post_recommendations(
     user_id: str, top_n: int = TOP_N
 ) -> RecommendationResponse:
-    """
-    Full pipeline: validate  score  DB filter  enrich  assemble.
-    Shared by the API endpoint and the CLI.
-    """
     validate_user_in_db(user_id)
 
-    df        = _build_score_df(user_id, top_n=top_n)
-    score_map = {
-        str(row["post_id"]): {
-            "final_score":    float(row["final_score"]),
-            "content_score":  float(row["content_score"]),
+    # 1. Score posts
+    df = _build_score_df(user_id, top_n=top_n)
+
+    score_map = {}
+
+for _, row in df.iterrows():
+    pid = str(row["post_id"])
+    if pid not in score_map:   # prevent overwrite duplicates
+
+        score_map[pid] = {
+            "final_score": float(row["final_score"]),
+            "content_score": float(row["content_score"]),
             "trending_score": float(row["trending_score"]),
-            "random_score":   float(row["random_score"]),
+            "random_score": float(row["random_score"]),
         }
         for _, row in df.iterrows()
     }
 
-    existing_ids = filter_posts_existing_in_db(list(score_map.keys()))
-    print(f"   {len(score_map)} scored | {len(existing_ids)} in DB | top {top_n} returned")
+    existing_post_ids = list(set(filter_posts_existing_in_db(list(score_map.keys()))))
 
-    final_ids = existing_ids[:top_n]
-    if not final_ids:
-        return RecommendationResponse(user_id=user_id, total_posts=0, top_n=top_n, posts=[])
+    # 2. Score reels
+    reel_df = _build_reel_score_df(top_n=top_n)
 
-    details_map = fetch_post_details(final_ids, requesting_user_id=user_id)
+    reel_score_map = {
+        row["reel_id"]: {
+            "final_score":    float(row["final_score"]),
+            "content_score":  0.0,
+            "trending_score": float(row["trending_score"]),
+            "random_score":   float(row["random_score"]),
+        }
+        for _, row in reel_df.iterrows()
+    }
 
+    existing_reel_ids = list(set(filter_reels_existing_in_db(list(reel_score_map.keys()))))
+
+    # ─────────────────────────────────────────────
+    # 🔥 GLOBAL DEDUPE (CRITICAL FIX)
+    # ─────────────────────────────────────────────
+    global_seen_ids = set()
+
+    # Remove cross-over BEFORE pool creation
+    existing_post_ids = [
+        pid for pid in existing_post_ids
+        if pid not in set(existing_reel_ids)
+    ]
+
+    existing_reel_ids = [
+        rid for rid in existing_reel_ids
+        if rid not in set(existing_post_ids)
+    ]
+
+    # 3. Shuffle for randomness
+    random.shuffle(existing_post_ids)
+    random.shuffle(existing_reel_ids)
+
+    post_pool = list(dict.fromkeys(existing_post_ids))[:top_n * 2]
+    reel_pool = list(dict.fromkeys(existing_reel_ids))[:top_n]
+
+    # 4. Interleave selection
+    final_post_ids = []
+    final_reel_ids = []
+
+    pi = ri = 0
+
+    for i in range(top_n):
+        if ri < len(reel_pool) and (i + 1) % 4 == 0:
+            final_reel_ids.append(reel_pool[ri])
+            ri += 1
+        elif pi < len(post_pool):
+            final_post_ids.append(post_pool[pi])
+            pi += 1
+
+    if not final_post_ids and not final_reel_ids:
+
+        return RecommendationResponse(
+        user_id=user_id,
+        total_posts=min(len(posts), top_n),
+        top_n=top_n,
+        posts=posts[:top_n]
+    )
+
+    # 5. Fetch details
+    details_map = fetch_post_details(final_post_ids, requesting_user_id=user_id)
+    reel_details_map = fetch_reel_details(final_reel_ids, requesting_user_id=user_id)
+
+    # 6. FINAL ASSEMBLY (FULL DEDUPE PROTECTION)
     posts: List[PostDetail] = []
-    for pid in final_ids:
-        detail = details_map.get(pid)
-        if not detail:
-            continue
-        posts.append(PostDetail(**detail, **score_map[pid]))
+    seen_ids = set()
+    pi = ri = 0
 
-    return RecommendationResponse(user_id=user_id, total_posts=len(posts), top_n=top_n, posts=posts)
+    i = 0
+    while len(posts) < top_n and (pi < len(final_post_ids) or ri < len(final_reel_ids)):
+
+        use_reel = (i + 1) % 4 == 0
+
+        if use_reel and ri < len(final_reel_ids):
+            rid = final_reel_ids[ri]
+            ri += 1
+
+            if str(rid) in seen_ids:
+        continue
+
+            detail = reel_details_map.get(rid)
+            if detail:
+                seen_ids.add(rid)
+                posts.append(PostDetail(**detail, **reel_score_map[rid]))
+
+        elif pi < len(final_post_ids):
+            pid = final_post_ids[pi]
+            pi += 1
+
+            if str(pid) in seen_ids:
+        continue
+
+            detail = details_map.get(pid)
+            if detail:
+                seen_ids.add(pid)
+                posts.append(PostDetail(**detail, **score_map[pid]))
+
+        i += 1
+
+    return RecommendationResponse(
+        user_id=user_id,
+        total_posts=len(posts),
+        top_n=top_n,
+        posts=posts
+    )

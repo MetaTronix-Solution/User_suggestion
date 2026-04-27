@@ -36,8 +36,10 @@ from services.post_service import TOP_N, compute_post_recommendations
 from services.user_service import compute_user_suggestions   #  ADDED
 from utils.helpers import _get_ram_mb
 
-load_dotenv()
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
+os.environ.setdefault("DB_PORT", "5436")
 # 
 # APP FACTORY
 # 
@@ -225,3 +227,22 @@ if __name__ == "__main__":
 
     except Exception as e:
         print(f"\n User recommendation failed: {e}")
+
+
+@app.get("/debug/db", tags=["Debug"])
+def debug_db():
+    from utils.helpers import DB_CONFIG
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_database(), current_user, inet_server_port()")
+            row = cur.fetchone()
+            return {
+                "database": row[0],
+                "user": row[1],
+                "port_actual": row[2],
+                "port_config": DB_CONFIG["port"],
+                "host_config": DB_CONFIG["host"],
+            }
+    finally:
+        conn.close()

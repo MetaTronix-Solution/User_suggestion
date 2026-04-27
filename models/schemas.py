@@ -29,6 +29,18 @@ class SharedPostDetails(BaseModel):
     media:      List[MediaItem]
 
 
+class SharedReelDetails(BaseModel):
+    id:          str
+    username:    str
+    full_name:   Optional[str]
+    avatar:      Optional[str]
+    caption:     Optional[str]
+    video:       Optional[str]
+    thumbnail:   Optional[str]
+    hls_playlist: Optional[str]
+    created_at:  str
+
+
 class PostDetail(BaseModel):
     id:                    str
     user_id:               str
@@ -53,6 +65,13 @@ class PostDetail(BaseModel):
     content_score:         float
     trending_score:        float
     random_score:          float
+    # reel-only fields (None for regular posts)
+    is_reel:               bool                      = False
+    video:                 Optional[str]             = None
+    thumbnail:             Optional[str]             = None
+    hls_playlist:          Optional[str]             = None
+    shared_reel:           Optional[str]             = None
+    shared_reel_details:   Optional[SharedReelDetails] = None
 
 
 class RecommendationResponse(BaseModel):

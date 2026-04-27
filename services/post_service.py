@@ -184,9 +184,7 @@ def _build_reel_score_df(top_n: int) -> pd.DataFrame:
 # PUBLIC API
 # ──────────────────────────────────────────────────────────────────────────────
 
-def compute_post_recommendations(
-    user_id: str, top_n: int = TOP_N
-) -> RecommendationResponse:
+def compute_post_recommendations(user_id: str, top_n: int = TOP_N) -> RecommendationResponse:
     validate_user_in_db(user_id)
 
     # 1. Score posts
@@ -194,60 +192,50 @@ def compute_post_recommendations(
 
     score_map = {}
 
-for _, row in df.iterrows():
-    pid = str(row["post_id"])
-    if pid not in score_map:   # prevent overwrite duplicates
+    for _, row in df.iterrows():
+        pid = str(row["post_id"])
 
-        score_map[pid] = {
-            "final_score": float(row["final_score"]),
-            "content_score": float(row["content_score"]),
-            "trending_score": float(row["trending_score"]),
-            "random_score": float(row["random_score"]),
-        }
-        for _, row in df.iterrows()
-    }
+        if pid not in score_map:
+            score_map[pid] = {
+                "final_score": float(row["final_score"]),
+                "content_score": float(row["content_score"]),
+                "trending_score": float(row["trending_score"]),
+                "random_score": float(row["random_score"]),
+            }
 
+    # filter valid posts from DB (ONLY ONCE)
     existing_post_ids = list(set(filter_posts_existing_in_db(list(score_map.keys()))))
 
     # 2. Score reels
     reel_df = _build_reel_score_df(top_n=top_n)
 
-    reel_score_map = {
-        row["reel_id"]: {
-            "final_score":    float(row["final_score"]),
-            "content_score":  0.0,
+    reel_score_map = {}
+
+    for _, row in reel_df.iterrows():
+        rid = str(row["reel_id"])
+
+        reel_score_map[rid] = {
+            "final_score": float(row["final_score"]),
+            "content_score": 0.0,
             "trending_score": float(row["trending_score"]),
-            "random_score":   float(row["random_score"]),
+            "random_score": float(row["random_score"]),
         }
-        for _, row in reel_df.iterrows()
-    }
 
     existing_reel_ids = list(set(filter_reels_existing_in_db(list(reel_score_map.keys()))))
 
     # ─────────────────────────────────────────────
-    # 🔥 GLOBAL DEDUPE (CRITICAL FIX)
+    # CROSS DEDUPE FIX
     # ─────────────────────────────────────────────
-    global_seen_ids = set()
+    existing_post_ids = [pid for pid in existing_post_ids if pid not in existing_reel_ids]
+    existing_reel_ids = [rid for rid in existing_reel_ids if rid not in existing_post_ids]
 
-    # Remove cross-over BEFORE pool creation
-    existing_post_ids = [
-        pid for pid in existing_post_ids
-        if pid not in set(existing_reel_ids)
-    ]
-
-    existing_reel_ids = [
-        rid for rid in existing_reel_ids
-        if rid not in set(existing_post_ids)
-    ]
-
-    # 3. Shuffle for randomness
     random.shuffle(existing_post_ids)
     random.shuffle(existing_reel_ids)
 
-    post_pool = list(dict.fromkeys(existing_post_ids))[:top_n * 2]
-    reel_pool = list(dict.fromkeys(existing_reel_ids))[:top_n]
+    post_pool = existing_post_ids[:top_n * 2]
+    reel_pool = existing_reel_ids[:top_n]
 
-    # 4. Interleave selection
+    # 3. Interleave selection
     final_post_ids = []
     final_reel_ids = []
 
@@ -261,25 +249,26 @@ for _, row in df.iterrows():
             final_post_ids.append(post_pool[pi])
             pi += 1
 
+    # 4. If empty fallback
     if not final_post_ids and not final_reel_ids:
-
         return RecommendationResponse(
-        user_id=user_id,
-        total_posts=min(len(posts), top_n),
-        top_n=top_n,
-        posts=posts[:top_n]
-    )
+            user_id=user_id,
+            total_posts=0,
+            top_n=top_n,
+            posts=[]
+        )
 
     # 5. Fetch details
     details_map = fetch_post_details(final_post_ids, requesting_user_id=user_id)
     reel_details_map = fetch_reel_details(final_reel_ids, requesting_user_id=user_id)
 
-    # 6. FINAL ASSEMBLY (FULL DEDUPE PROTECTION)
+    # 6. Build final response
     posts: List[PostDetail] = []
     seen_ids = set()
-    pi = ri = 0
 
+    pi = ri = 0
     i = 0
+
     while len(posts) < top_n and (pi < len(final_post_ids) or ri < len(final_reel_ids)):
 
         use_reel = (i + 1) % 4 == 0
@@ -288,8 +277,8 @@ for _, row in df.iterrows():
             rid = final_reel_ids[ri]
             ri += 1
 
-            if str(rid) in seen_ids:
-        continue
+            if rid in seen_ids:
+                continue
 
             detail = reel_details_map.get(rid)
             if detail:
@@ -300,8 +289,8 @@ for _, row in df.iterrows():
             pid = final_post_ids[pi]
             pi += 1
 
-            if str(pid) in seen_ids:
-        continue
+            if pid in seen_ids:
+                continue
 
             detail = details_map.get(pid)
             if detail:

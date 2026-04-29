@@ -19,3 +19,4 @@ apscheduler
 scipy
 nltk
 sentencepiece
+faiss-cpu

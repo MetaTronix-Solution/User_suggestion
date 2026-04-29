@@ -17,7 +17,7 @@ from score.content_score import search_posts_for_user
 from score.collaborative_score import collaborative_filter_response
 from utils.helpers import REC_WEIGHTS, TRENDING_CSV, _min_max_normalize
 
-TOP_N      = 10
+TOP_N      = 20
 OUTPUT_CSV = False
 
 

@@ -29,7 +29,7 @@ DB_CONFIG = {
 }
 print(f"[DB] Connecting to {DB_CONFIG['host']}:{DB_CONFIG['port']} / {DB_CONFIG['dbname']}")
 
-MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "http://36.253.137.34:8005").rstrip("/")
+MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "http://36.253.137.34:8006").rstrip("/")
 TRENDING_CSV = "data/post_trending_scores.csv"
 
 # Four-signal recommendation weights
@@ -40,7 +40,9 @@ REC_WEIGHTS = {
     "collaborative_score": float(os.getenv("W_COLLABORATIVE", 0.40)),
 }
 
-def full_url(path: str | None) -> str | None:
+from typing import Optional
+
+def full_url(path: Optional[str]) -> Optional[str]:
     if not path:
         return None
     return path if path.startswith("http") else f"{MEDIA_BASE_URL}/media/{path.lstrip('/')}"

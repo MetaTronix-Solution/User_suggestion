@@ -11,7 +11,7 @@ Run CLI:
 import warnings
 import pandas as pd
 warnings.filterwarnings("ignore", category=FutureWarning)
-pd.set_option('future.no_silent_downcasting', True)
+# pd.set_option('future.no_silent_downcasting', True)
 
 import gc
 import os

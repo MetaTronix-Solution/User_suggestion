@@ -35,7 +35,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-innovator_user}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-innovator_user}" ]
       interval: 10s
       timeout: 5s
       retries: 5

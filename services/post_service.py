@@ -103,7 +103,7 @@ def _build_score_df(user_id: str, top_n: int, save_csv: bool = False) -> pd.Data
     df["content_score"] = df["content_score"].fillna(0.0)
 
     df = pd.merge(df, df_collab, on="post_id", how="left")
-    df["collaborative_score"] = df["collaborative_score"].fillna(0.0).infer_objects(copy=False)
+    df["collaborative_score"] = df["collaborative_score"].fillna(0.0).infer_objects()
 
     df["random_score_norm"]        = _min_max_normalize(df["random_score"])
     df["trending_score_norm"]      = _min_max_normalize(df["trending_score"])

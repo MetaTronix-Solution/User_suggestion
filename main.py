@@ -23,15 +23,13 @@ from datetime import datetime, timezone
 import psycopg2
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from db.queries import get_db_connection, validate_user_in_db
 from embeddings.cache import clear as clear_embed_cache, size as embed_cache_size
 from embeddings.model import lifespan
 from monitoring import monitor_requests
-from routers.post_router import router as post_router
-from routers.user_router import router as user_router
 from services.post_service import TOP_N, compute_post_recommendations
 from services.user_service import compute_user_suggestions   #  ADDED
 from utils.helpers import _get_ram_mb
@@ -59,13 +57,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.middleware("http")(monitor_requests)
-
-app.include_router(user_router)
-app.include_router(post_router)
-
-
-#  Health 
+# 
+# ROUTES
+# 
 
 @app.get("/", tags=["Health"])
 def home():
@@ -86,6 +80,34 @@ def health():
         }
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
+
+
+@app.get("/suggestions/{user_id}", tags=["Recommendations"])
+def get_post_recommendations(
+    user_id: str,
+    top_n: int = Query(default=TOP_N, ge=1, le=100, description="Number of items to return"),
+):
+    """Get post/reel recommendations (60% posts, 40% reels)."""
+    try:
+        validate_user_in_db(user_id)
+        return compute_post_recommendations(user_id, top_n=top_n)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"Error in recommendations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/suggest/{user_id}", tags=["Suggestions"])
+def get_user_suggestions(
+    user_id: str,
+    limit: int = Query(10, ge=1, le=50, description="Number of user suggestions to return"),
+):
+    """Get user follow suggestions."""
+    try:
+        return compute_user_suggestions(user_id, limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 #  Cache Management 

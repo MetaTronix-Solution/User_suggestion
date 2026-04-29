@@ -31,7 +31,8 @@ from embeddings.cache import clear as clear_embed_cache, size as embed_cache_siz
 from embeddings.model import lifespan
 from monitoring import monitor_requests
 from services.post_service import TOP_N, compute_post_recommendations
-from services.user_service import compute_user_suggestions   #  ADDED
+from services.user_service import compute_user_suggestions
+from models.schemas import RecommendationResponse
 from utils.helpers import _get_ram_mb
 
 from dotenv import load_dotenv
@@ -82,7 +83,7 @@ def health():
         raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
 
 
-@app.get("/suggestions/{user_id}", tags=["Recommendations"])
+@app.get("/suggestions/{user_id}", tags=["Recommendations"], response_model=RecommendationResponse)
 def get_post_recommendations(
     user_id: str,
     top_n: int = Query(default=TOP_N, ge=1, le=100, description="Number of items to return"),
